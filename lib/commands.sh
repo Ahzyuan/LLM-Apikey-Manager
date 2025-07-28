@@ -60,7 +60,7 @@ cmd_init() {
     fi
     
     # Create initial empty configuration
-    local initial_config='{"profiles":{},"metadata":{"created":"'$(date -Iseconds)'","version":"'$(get_version)'"}}'
+    local initial_config='{"profiles":{},"metadata":{"created":"'$(date -Iseconds)'","version":"'$(get_version_info | cut -d'|' -f1)'"}}'
     
     if ! save_session_config "$initial_config" "$password"; then
         log_error "Failed to save initial configuration"
@@ -325,11 +325,13 @@ cmd_list() {
 
 # Show version information
 cmd_version() {
+    local version_info
     local version_number
     local version_description
     
-    version_number=$(get_version)
-    version_description=$(get_version_description)
+    version_info=$(get_version_info)
+    version_number=$(echo "$version_info" | cut -d'|' -f1)
+    version_description=$(echo "$version_info" | cut -d'|' -f2)
     
     echo "LAM (LLM API Manager) v${version_number}"
     if [[ -n "$version_description" ]]; then
@@ -339,7 +341,7 @@ cmd_version() {
 
 # Show help
 cmd_help() {
-    echo "LAM (LLM API Manager) v$(get_version) - Secure management of LLM API credentials"
+    echo "LAM (LLM API Manager) v$(get_version_info | cut -d'|' -f1) - Secure management of LLM API credentials"
     echo
     cat << 'EOF'
 USAGE:
@@ -862,7 +864,9 @@ cmd_stats() {
     echo
     
     # Basic info
-    echo "Version: $(get_version) ($(get_version_description))"
+    local version_info
+    version_info=$(get_version_info)
+    echo "Version: $(echo "$version_info" | cut -d'|' -f1) ($(echo "$version_info" | cut -d'|' -f2))"
     echo "Config Directory: $CONFIG_DIR"
     echo "Session Timeout: ${SESSION_TIMEOUT}s"
     echo

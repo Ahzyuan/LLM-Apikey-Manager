@@ -189,27 +189,25 @@ _find_version_file() {
     echo "$script_dir/VERSION"
 }
 
-# Get version from VERSION file
-get_version() {
+# Get version info from VERSION file (returns "version|description")
+get_version_info() {
     local version_file
     version_file=$(_find_version_file)
     
     if [[ -f "$version_file" ]]; then
-        head -n1 "$version_file" | tr -d '[:space:]'
+        local version_content
+        version_content=$(cat "$version_file")
+        
+        local version_number
+        version_number=$(echo "$version_content" | head -n1 | tr -d '[:space:]')
+        
+        local version_description
+        version_description=$(echo "$version_content" | tail -n +2 | grep -v '^[[:space:]]*$' | head -n1)
+        
+        echo "${version_number}|${version_description}"
     else
-        echo "3.1.0"  # Fallback version
-    fi
-}
-
-# Get version description from VERSION file
-get_version_description() {
-    local version_file
-    version_file=$(_find_version_file)
-    
-    if [[ -f "$version_file" ]]; then
-        tail -n +2 "$version_file" | grep -v '^[[:space:]]*$' | head -n1
-    else
-        echo "Security Hardened - Enhanced with security improvements and better error handling"
+        log_warning "No version file found at ${version_file}"
+        log_info "You can re-clone the repo( https://github.com/Ahzyuan/LLM-Apikey-Manager ) and run install.sh again to fix this issue."
     fi
 }
 
