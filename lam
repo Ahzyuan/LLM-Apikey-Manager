@@ -2,8 +2,7 @@
 
 # LAM (LLM API Manager) - Modular Version
 # A secure tool to manage LLM API keys and base URLs
-# Author: Rovo Dev
-# Version: 3.1.0 (Security Hardened)
+# Author: Ahzyuan
 
 set -euo pipefail
 
@@ -88,10 +87,10 @@ main() {
         "test")
             cmd_test
             ;;
-        "backup")
+        "backup"|"bak")
             cmd_backup "${2:-}"
             ;;
-        "stats"|"status")
+        "status")
             cmd_stats
             ;;
         "update")
@@ -100,10 +99,10 @@ main() {
         "uninstall")
             cmd_uninstall
             ;;
-        "help"|"--help")
+        "help"|"-h")
             cmd_help
             ;;
-        "--version")
+        "version"|"-v")
             cmd_version
             ;;
         *)

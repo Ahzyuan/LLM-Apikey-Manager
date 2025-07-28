@@ -60,7 +60,7 @@ cmd_init() {
     fi
     
     # Create initial empty configuration
-    local initial_config='{"profiles":{},"metadata":{"created":"'$(date -Iseconds)'","version":"3.1.0"}}'
+    local initial_config='{"profiles":{},"metadata":{"created":"'$(date -Iseconds)'","version":"'$(get_version)'"}}'
     
     if ! save_session_config "$initial_config" "$password"; then
         log_error "Failed to save initial configuration"
@@ -69,10 +69,10 @@ cmd_init() {
     
     log_success "LAM initialized successfully!"
     echo
-    log_info "You can now add API configurations using: lam add <profile_name>"
+    log_info "You can now add API profiles using: lam add <profile_name>"
 }
 
-# Add new API configuration with enhanced validation
+# Add new API profile with enhanced validation
 cmd_add() {
     local name="$1"
     
@@ -99,7 +99,7 @@ cmd_add() {
     
     if [[ "$existing_profile" != "null" ]]; then
         log_warning "Profile '$name' already exists!"
-        echo -n "Do you want to overwrite it? (y/N): "
+        echo -en "${YELLOW}Do you want to overwrite it? (y/N): ${NC}"
         local confirm
         if ! read -r confirm; then
             log_error "Failed to read confirmation"
@@ -112,16 +112,16 @@ cmd_add() {
         fi
     fi
     
-    log_info "Adding new API configuration: $name"
+    log_info "Adding new API profile: $name"
     echo
-    log_info "Enter your API configuration details:"
+    log_info "Enter your API profile details:"
     echo
     
     # Initialize empty env_vars object
     local env_vars='{}'
     
     # Collect API Key
-    echo -n "API Key (e.g., OPENAI_API_KEY=sk-123... or API_KEY=your_key): "
+    echo -en "${BLUE}API Key${NC} (e.g., OPENAI_API_KEY=sk-123... or API_KEY=your_key): "
     local api_key_input
     if ! read -r api_key_input; then
         log_error "Failed to read API key"
@@ -146,7 +146,7 @@ cmd_add() {
     log_success "Added: $api_key_name=***"
     
     # Collect Base URL
-    echo -n "Base URL (e.g., BASE_URL=https://api.openai.com/v1): "
+    echo -en "${BLUE}Base URL${NC} (e.g., BASE_URL=https://api.openai.com/v1): "
     local base_url_input
     if ! read -r base_url_input; then
         log_error "Failed to read base URL"
@@ -180,7 +180,7 @@ cmd_add() {
     echo
     echo "Additional environment variables (optional):"
     while true; do
-        echo -n "Environment variable (KEY=VALUE, or press Enter to continue): "
+        echo -en "${BLUE}Environment variable${NC} (KEY=VALUE, or press Enter to continue): "
         local env_input
         if ! read -r env_input; then
             log_error "Failed to read input"
@@ -224,7 +224,7 @@ cmd_add() {
     done
     
     # Collect model name
-    echo -n "Model Name (optional, e.g., gpt-4): "
+    echo -en "${BLUE}Model Name${NC} (optional, e.g., gpt-4): "
     local model_name
     if ! read -r model_name; then
         log_error "Failed to read model name"
@@ -233,7 +233,7 @@ cmd_add() {
     model_name=$(sanitize_input "$model_name")
     
     # Collect description
-    echo -n "Description (optional): "
+    echo -en "${BLUE}Description${NC} (optional): "
     local description
     if ! read -r description; then
         log_error "Failed to read description"
@@ -283,7 +283,7 @@ cmd_add() {
     log_info "You can now use it with: eval \"\$(lam use $name)\""
 }
 
-# List all configurations with enhanced formatting
+# List all profiles with enhanced formatting
 cmd_list() {
     local config
     if ! config=$(get_session_config); then
@@ -325,46 +325,79 @@ cmd_list() {
 
 # Show version information
 cmd_version() {
-    echo "LAM (LLM API Manager) v3.1.0 (Security Hardened)"
-    echo "Enhanced with security improvements and better error handling"
+    # Try to find VERSION file relative to the main script
+    local version_file
+    local script_dir
+    
+    # Get script directory from the main lam script location
+    if [[ -n "${BASH_SOURCE[0]}" ]]; then
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    else
+        # Fallback: try common locations
+        for dir in "$(pwd)" "$(dirname "$(which lam 2>/dev/null)")" "/usr/local/share/lam" "$HOME/.local/share/lam"; do
+            if [[ -f "$dir/VERSION" ]]; then
+                script_dir="$dir"
+                break
+            fi
+        done
+    fi
+    
+    version_file="$script_dir/VERSION"
+    
+    if [[ -f "$version_file" ]]; then
+        # Read version info from VERSION file
+        local version_info
+        version_info=$(cat "$version_file")
+        
+        # Extract version number (first line)
+        local version_number
+        version_number=$(echo "$version_info" | head -n1 | tr -d '[:space:]')
+        
+        # Extract description (remaining lines)
+        local version_description
+        version_description=$(echo "$version_info" | tail -n +2 | grep -v '^[[:space:]]*$' | head -n1)
+        
+        echo "LAM (LLM API Manager) v${version_number}"
+        if [[ -n "$version_description" ]]; then
+            echo "$version_description"
+        fi
+    else
+        # Fallback if VERSION file is missing
+        log_warning "VERSION file not found at $version_file, using fallback version info"
+        echo "LAM (LLM API Manager) v$(get_version) ($(get_version_description))"
+    fi
 }
 
 # Show help
 cmd_help() {
+    echo "LAM (LLM API Manager) v$(get_version) - Secure management of LLM API credentials"
+    echo
     cat << 'EOF'
-LAM (LLM API Manager) v3.1.0 - Secure management of LLM API credentials
-
 USAGE:
     lam <command> [arguments]
 
 COMMANDS:
-    init                    Initialize the tool with master password
-    add <n>              Add new API configuration
-    list                    List all configurations
-    show <n>             Show configuration details (masked values)
-    use <n>              Export configuration to environment variables
-    edit <n>             Edit existing configuration
-    delete <n>           Delete configuration
+    init                    Initialize/Reset the master password
+    add <name>              Add new API profile
+    list, ls                List all profiles
+    show <name>             Show profile details
+    use <name>              Export profile to environment variables
+    edit <name>             Edit existing profile
+    delete, del <name>      Delete specific profile
     status                  Show LAM status and statistics
     test                    Test API connection for current profile
-    backup [file]           Backup all profiles
-    update                  Update LAM to latest version
+    backup, bak [file]      Backup all profiles
+    upgrade, update         Upgrade LAM to latest version
     uninstall               Completely remove LAM from system
-    help                    Show this help message
-    --version               Show version information
+    help, -h                Show this help message
+    version, -v             Show version information
 
-SECURITY IMPROVEMENTS:
-    - Enhanced password validation and secure input handling
-    - Protection against command injection attacks
-    - Atomic file operations to prevent race conditions
-    - Comprehensive input validation and sanitization
-    - Improved error handling and cleanup mechanisms
-
-For detailed examples and usage, see the README.md file.
+For detailed examples and usage, refer to: https://github.com/Ahzyuan/LLM-Apikey-Manager 🚀.
+Looking forward to your star ⭐, feedback 💬 and contributions 🤝!
 EOF
 }
 
-# Show specific configuration with secure masking
+# Show specific profile with secure masking
 cmd_show() {
     local name="$1"
     
@@ -544,7 +577,7 @@ cmd_edit() {
     echo "2. Model name"
     echo "3. Description"
     echo "4. All of the above"
-    echo -n "Enter choice (1-4): "
+    echo -en "${BLUE}Enter choice (1-4): ${NC}"
     read -r choice
     
     local new_env_vars="$current_env_vars"
@@ -563,12 +596,12 @@ cmd_edit() {
             echo "1. Add/modify a variable"
             echo "2. Delete a variable"
             echo "3. Done editing variables"
-            echo -n "Choose (1-3): "
+            echo -en "${BLUE}Choose (1-3): ${NC}"
             read -r var_choice
             
             case "$var_choice" in
                 "1")
-                    echo -n "Environment variable (KEY=VALUE): "
+                    echo -en "${BLUE}Environment variable${NC} (KEY=VALUE): "
                     read -r env_input
                     
                     if [[ ! "$env_input" =~ ^[A-Z_][A-Z0-9_]*=[[:print:]]+$ ]]; then
@@ -584,15 +617,45 @@ cmd_edit() {
                     ;;
                 "2")
                     echo "Current variables:"
-                    echo "$new_env_vars" | jq -r 'keys[]' | nl -v1
-                    echo -n "Enter variable name to delete: "
-                    read -r delete_key
+                    local var_keys=($(echo "$new_env_vars" | jq -r 'keys[]'))
                     
-                    if echo "$new_env_vars" | jq -e --arg key "$delete_key" 'has($key)' >/dev/null; then
+                    if [[ ${#var_keys[@]} -eq 0 ]]; then
+                        log_error "No variables to delete!"
+                        continue
+                    fi
+                    
+                    # Display numbered list
+                    for i in "${!var_keys[@]}"; do
+                        echo "$((i+1)). ${var_keys[i]}"
+                    done
+                    
+                    echo -en "${BLUE}Enter number to delete (1-${#var_keys[@]}): ${NC}"
+                    read -r delete_choice
+                    
+                    # Validate choice is a number
+                    if ! [[ "$delete_choice" =~ ^[0-9]+$ ]]; then
+                        log_error "Please enter a valid number!"
+                        continue
+                    fi
+                    
+                    # Validate choice is in range
+                    if [[ "$delete_choice" -lt 1 || "$delete_choice" -gt ${#var_keys[@]} ]]; then
+                        log_error "Please enter a number between 1 and ${#var_keys[@]}!"
+                        continue
+                    fi
+                    
+                    # Get the key to delete (array is 0-indexed, user input is 1-indexed)
+                    local delete_key="${var_keys[$((delete_choice-1))]}"
+                    
+                    # Confirm deletion
+                    echo -en "${YELLOW}Delete '$delete_key'?${NC} (y/N): "
+                    read -r confirm
+                    
+                    if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
                         new_env_vars=$(echo "$new_env_vars" | jq --arg key "$delete_key" 'del(.[$key])')
                         log_success "Deleted: $delete_key"
                     else
-                        log_error "Variable '$delete_key' not found!"
+                        log_info "Deletion cancelled."
                     fi
                     ;;
                 "3")
@@ -613,7 +676,7 @@ cmd_edit() {
     if [[ "$choice" == "2" || "$choice" == "4" ]]; then
         echo
         echo "Current model: $current_model_name"
-        echo -n "New model name (press Enter to keep current): "
+        echo -en "${BLUE}New model name${NC} (press Enter to keep current): "
         read -r new_model_name
         new_model_name=${new_model_name:-$current_model_name}
     fi
@@ -621,7 +684,7 @@ cmd_edit() {
     if [[ "$choice" == "3" || "$choice" == "4" ]]; then
         echo
         echo "Current description: $current_description"
-        echo -n "New description (press Enter to keep current): "
+        echo -en "${BLUE}New description${NC} (press Enter to keep current): "
         read -r new_description
         new_description=${new_description:-$current_description}
     fi
@@ -647,7 +710,7 @@ cmd_edit() {
     log_success "Profile '$name' updated successfully!"
 }
 
-# Delete configuration with enhanced validation
+# Delete profile with enhanced validation
 cmd_delete() {
     local name="$1"
     
@@ -676,7 +739,7 @@ cmd_delete() {
         return 1
     fi
     
-    echo -n "Are you sure you want to delete profile '$name'? (y/N): "
+    echo -en "${YELLOW}Are you sure you want to delete profile '$name'?${NC} (y/N): "
     local confirm
     if ! read -r confirm; then
         log_error "Failed to read confirmation"
@@ -830,7 +893,7 @@ cmd_stats() {
     echo
     
     # Basic info
-    echo "Version: 3.1.0 (Security Hardened)"
+    echo "Version: $(get_version) ($(get_version_description))"
     echo "Config Directory: $CONFIG_DIR"
     echo "Session Timeout: ${SESSION_TIMEOUT}s"
     echo
