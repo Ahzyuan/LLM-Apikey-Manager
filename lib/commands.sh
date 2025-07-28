@@ -325,46 +325,15 @@ cmd_list() {
 
 # Show version information
 cmd_version() {
-    # Try to find VERSION file relative to the main script
-    local version_file
-    local script_dir
+    local version_number
+    local version_description
     
-    # Get script directory from the main lam script location
-    if [[ -n "${BASH_SOURCE[0]}" ]]; then
-        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    else
-        # Fallback: try common locations
-        for dir in "$(pwd)" "$(dirname "$(which lam 2>/dev/null)")" "/usr/local/share/lam" "$HOME/.local/share/lam"; do
-            if [[ -f "$dir/VERSION" ]]; then
-                script_dir="$dir"
-                break
-            fi
-        done
-    fi
+    version_number=$(get_version)
+    version_description=$(get_version_description)
     
-    version_file="$script_dir/VERSION"
-    
-    if [[ -f "$version_file" ]]; then
-        # Read version info from VERSION file
-        local version_info
-        version_info=$(cat "$version_file")
-        
-        # Extract version number (first line)
-        local version_number
-        version_number=$(echo "$version_info" | head -n1 | tr -d '[:space:]')
-        
-        # Extract description (remaining lines)
-        local version_description
-        version_description=$(echo "$version_info" | tail -n +2 | grep -v '^[[:space:]]*$' | head -n1)
-        
-        echo "LAM (LLM API Manager) v${version_number}"
-        if [[ -n "$version_description" ]]; then
-            echo "$version_description"
-        fi
-    else
-        # Fallback if VERSION file is missing
-        log_warning "VERSION file not found at $version_file, using fallback version info"
-        echo "LAM (LLM API Manager) v$(get_version) ($(get_version_description))"
+    echo "LAM (LLM API Manager) v${version_number}"
+    if [[ -n "$version_description" ]]; then
+        echo "$version_description"
     fi
 }
 

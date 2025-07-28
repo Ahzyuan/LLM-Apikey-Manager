@@ -169,17 +169,16 @@ create_temp_file() {
     echo "$temp_file"
 }
 
-# Get version from VERSION file
-get_version() {
-    local version_file
+# Find VERSION file location (shared utility)
+_find_version_file() {
     local script_dir
     
     # Get script directory from the main lam script location
     if [[ -n "${BASH_SOURCE[0]}" ]]; then
         script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     else
-        # Fallback: try common locations
-        for dir in "$(pwd)" "$(dirname "$(which lam 2>/dev/null)")" "/usr/local/bin" "$HOME/.local/bin"; do
+        # Fallback: try common locations where LAM might be installed
+        for dir in "$(dirname "$(which lam 2>/dev/null)")" "$(pwd)" "/usr/local/share/lam" "$HOME/.local/share/lam"; do
             if [[ -f "$dir/VERSION" ]]; then
                 script_dir="$dir"
                 break
@@ -187,7 +186,13 @@ get_version() {
         done
     fi
     
-    version_file="$script_dir/VERSION"
+    echo "$script_dir/VERSION"
+}
+
+# Get version from VERSION file
+get_version() {
+    local version_file
+    version_file=$(_find_version_file)
     
     if [[ -f "$version_file" ]]; then
         head -n1 "$version_file" | tr -d '[:space:]'
@@ -199,22 +204,7 @@ get_version() {
 # Get version description from VERSION file
 get_version_description() {
     local version_file
-    local script_dir
-    
-    # Get script directory from the main lam script location
-    if [[ -n "${BASH_SOURCE[0]}" ]]; then
-        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-    else
-        # Fallback: try common locations
-        for dir in "$(pwd)" "$(dirname "$(which lam 2>/dev/null)")" "/usr/local/bin" "$HOME/.local/bin"; do
-            if [[ -f "$dir/VERSION" ]]; then
-                script_dir="$dir"
-                break
-            fi
-        done
-    fi
-    
-    version_file="$script_dir/VERSION"
+    version_file=$(_find_version_file)
     
     if [[ -f "$version_file" ]]; then
         tail -n +2 "$version_file" | grep -v '^[[:space:]]*$' | head -n1
