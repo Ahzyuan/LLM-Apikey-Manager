@@ -863,23 +863,29 @@ cmd_stats() {
     echo "======================"
     echo
     
-    # Basic info
-    local version_info
-    version_info=$(get_version_info)
-    echo "Version: $(echo "$version_info" | cut -d'|' -f1) ($(echo "$version_info" | cut -d'|' -f2))"
-    echo "Config Directory: $CONFIG_DIR"
-    echo "Session Timeout: ${SESSION_TIMEOUT}s"
+    # Session info
+    echo -e "${BLUE}Session Details${NC}"
+    echo "---------------"
+    if is_session_valid; then
+        log_gray "• Status: Active"
+        local session_age
+        session_age=$(( $(date +%s) - $(stat -c %Y "$SESSION_FILE" 2>/dev/null || echo 0) ))
+        log_gray "• Session Age: ${session_age}s / ${SESSION_TIMEOUT}s"
+    else
+        log_gray "• Status: Expired (should verify master password again)"
+        log_gray "• Session Age: 0s / ${SESSION_TIMEOUT}s"
+    fi
     echo
     
     # Profile statistics
     local profile_count
     profile_count=$(echo "$config" | jq -r '.profiles | length')
-    echo "Total Profiles: $profile_count"
+    
+    echo -e "${BLUE}Profile Details${NC}"
+    echo "---------------"
     
     if [[ "$profile_count" -gt 0 ]]; then
-        echo
-        echo "Profile Details:"
-        echo "---------------"
+        local current_profile="${LLM_CURRENT_PROFILE:-}"
         
         while IFS= read -r profile_name; do
             local profile
@@ -889,28 +895,18 @@ cmd_stats() {
             local last_used
             last_used=$(echo "$profile" | jq -r '.last_used // "Never"')
             
-            echo "• $profile_name: $env_count env vars, last used: $last_used"
+            # Check if this is the active profile
+            if [[ "$profile_name" == "$current_profile" ]]; then
+                echo -e "• ${GREEN}$profile_name (active)${NC}: $env_count env vars, last used: $last_used"
+            else
+                log_gray "• $profile_name: $env_count env vars, last used: $last_used"
+            fi
         done <<< "$(echo "$config" | jq -r '.profiles | keys[]')"
-    fi
-    
-    echo
-    
-    # Session info
-    if is_session_valid; then
-        echo "Session: Active"
-        local session_age
-        session_age=$(( $(date +%s) - $(stat -c %Y "$SESSION_FILE" 2>/dev/null || echo 0) ))
-        echo "Session Age: ${session_age}s"
     else
-        echo "Session: Expired/None"
+        echo "No profiles configured yet."
+        echo "Use 'lam add <profile_name>' to add a profile."
     fi
-    
-    # Current profile
-    if [[ -n "${LLM_CURRENT_PROFILE:-}" ]]; then
-        echo "Active Profile: $LLM_CURRENT_PROFILE"
-    else
-        echo "Active Profile: None"
-    fi
+    echo 
 }
 
 # Update LAM with enhanced security
@@ -1004,16 +1000,16 @@ show_manual_update_instructions() {
     echo "====================="
     echo
     log_info "1. Download LAM source code from GitHub:"
-    echo "   • Visit: https://github.com/Ahzyuan/LLM-Apikey-Manager"
-    echo "   • Click 'Code' → 'Download ZIP' OR"
-    echo "   • Clone: git clone https://github.com/Ahzyuan/LLM-Apikey-Manager.git"
+    log_gray "   • Visit: https://github.com/Ahzyuan/LLM-Apikey-Manager"
+    log_gray "   • Click 'Code' → 'Download ZIP' OR"
+    log_gray "   • Clone: git clone https://github.com/Ahzyuan/LLM-Apikey-Manager.git"
     echo
     log_info "2. Extract and navigate to the project directory:"
-    echo "   • unzip lam-main.zip && cd lam-main  OR"
-    echo "   • cd lam"
+    log_gray "   • unzip lam-main.zip && cd lam-main  OR"
+    log_gray "   • cd lam"
     echo
     log_info "3. Run the manual update script:"
-    echo "   • ./version_update.sh"
+    log_gray "   • ./version_update.sh"
     echo
     log_gray "The version_update.sh script will:"
     log_gray "• Find your current LAM installation"
