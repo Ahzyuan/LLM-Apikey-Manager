@@ -938,7 +938,7 @@ cmd_update() {
     log_info "Downloading latest version..."
     
     # Download the latest version from GitHub
-    if curl -sL "https://raw.githubusercontent.com/your-repo/lam/main/lam" -o "$temp_dir/lam"; then
+    if curl -sL "https://raw.githubusercontent.com/Ahzyuan/LLM-Apikey-Manager/lam" -o "$temp_dir/lam"; then
         # Verify the downloaded file
         if [[ -f "$temp_dir/lam" ]] && [[ -s "$temp_dir/lam" ]] && head -1 "$temp_dir/lam" | grep -q "#!/bin/bash"; then
             # Extract version from downloaded file
@@ -1004,9 +1004,9 @@ show_manual_update_instructions() {
     echo "====================="
     echo
     log_info "1. Download LAM source code from GitHub:"
-    echo "   • Visit: https://github.com/your-repo/lam"
+    echo "   • Visit: https://github.com/Ahzyuan/LLM-Apikey-Manager"
     echo "   • Click 'Code' → 'Download ZIP' OR"
-    echo "   • Clone: git clone https://github.com/your-repo/lam.git"
+    echo "   • Clone: git clone https://github.com/Ahzyuan/LLM-Apikey-Manager.git"
     echo
     log_info "2. Extract and navigate to the project directory:"
     echo "   • unzip lam-main.zip && cd lam-main  OR"
