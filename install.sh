@@ -98,7 +98,7 @@ check_install_scope() {
 # Validate modular LAM installation files
 check_file_integrity() {
     log_info "Checking for required files for LAM installation..."
-    required_modules=("core.sh" "security.sh" "config.sh" "validation.sh" "system.sh" "commands.sh")
+    required_modules=("security.sh" "config.sh" "commands.sh" "utils.sh")
     local missing_modules=()
 
     # Check for modular executable
@@ -210,6 +210,7 @@ test_installation() {
     else
         log_success "LAM command found at: $lam_command"
     fi
+    echo
         
     # Test help command
     log_info "Testing help command..."
