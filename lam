@@ -53,7 +53,7 @@ main() {
     
     # Commands that don't require initialization
     case "$command" in
-        "init"|"update"|"uninstall"|"help"|"-h"|"--help"|"--version")
+        "init"|"update"|"uninstall"|"help"|"-h"|"version"|"-v")
             # These commands can run without initialization
             ;;
         *)
