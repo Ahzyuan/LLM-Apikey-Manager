@@ -175,15 +175,18 @@ _find_version_file() {
     
     # Get script directory from the main lam script location
     if [[ -n "${BASH_SOURCE[0]}" ]]; then
-        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)" || script_dir="$(pwd)"
     else
         # Fallback: try common locations where LAM might be installed
-        for dir in "$(dirname "$(which lam 2>/dev/null)")" "$(pwd)" "/usr/local/share/lam" "$HOME/.local/share/lam"; do
-            if [[ -f "$dir/VERSION" ]]; then
+        script_dir=""
+        for dir in "$(dirname "$(which lam 2>/dev/null)" 2>/dev/null)" "$(pwd)" "/usr/local/share/lam" "$HOME/.local/share/lam"; do
+            if [[ -n "$dir" && -f "$dir/VERSION" ]]; then
                 script_dir="$dir"
                 break
             fi
         done
+        # Final fallback
+        [[ -z "$script_dir" ]] && script_dir="$(pwd)"
     fi
     
     echo "$script_dir/VERSION"
@@ -196,18 +199,22 @@ get_version_info() {
     
     if [[ -f "$version_file" ]]; then
         local version_content
-        version_content=$(cat "$version_file")
+        version_content=$(cat "$version_file" 2>/dev/null) || {
+            echo "unknown|"
+            return 0
+        }
         
         local version_number
-        version_number=$(echo "$version_content" | head -n1 | tr -d '[:space:]')
+        version_number=$(echo "$version_content" | head -n1 | tr -d '[:space:]' 2>/dev/null) || version_number="unknown"
         
         local version_description
-        version_description=$(echo "$version_content" | tail -n +2 | grep -v '^[[:space:]]*$' | head -n1)
+        # Use safer approach to get description - handle case where there's no second line
+        version_description=$(echo "$version_content" | tail -n +2 2>/dev/null | grep -v '^[[:space:]]*$' 2>/dev/null | head -n1 2>/dev/null) || version_description=""
         
         echo "${version_number}|${version_description}"
     else
-        log_warning "No version file found at ${version_file}"
-        log_info "You can re-clone the repo( https://github.com/Ahzyuan/LLM-Apikey-Manager ) and run install.sh again to fix this issue."
+        # Don't log warnings for help/version commands - just return default
+        echo "unknown|"
     fi
 }
 
