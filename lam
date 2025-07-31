@@ -36,7 +36,12 @@ readonly SESSION_TIMEOUT=${LAM_SESSION_TIMEOUT:-1800}  # 30 minutes default
 source "$SCRIPT_DIR/lib/utils.sh"
 source "$SCRIPT_DIR/lib/security.sh"
 source "$SCRIPT_DIR/lib/config.sh"
-source "$SCRIPT_DIR/lib/commands.sh"
+
+# Load command modules
+source "$SCRIPT_DIR/lib/commands/core.sh"
+source "$SCRIPT_DIR/lib/commands/backup.sh"
+source "$SCRIPT_DIR/lib/commands/help.sh"
+source "$SCRIPT_DIR/lib/commands/system.sh"
 
 # Set trap for cleanup on exit
 trap cleanup_temp_resources EXIT
@@ -91,7 +96,7 @@ main() {
             cmd_backup "${2:-}"
             ;;
         "status")
-            cmd_stats
+            cmd_status
             ;;
         "update")
             cmd_update

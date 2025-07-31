@@ -98,8 +98,10 @@ check_install_scope() {
 # Validate modular LAM installation files
 check_file_integrity() {
     log_info "Checking for required files for LAM installation..."
-    required_modules=("security.sh" "config.sh" "commands.sh" "utils.sh")
+    required_modules=("security.sh" "config.sh" "utils.sh")
+    required_command_modules=("core.sh" "backup.sh" "help.sh" "system.sh")
     local missing_modules=()
+    local missing_command_modules=()
 
     # Check for modular executable
     if [[ ! -f "lam" ]]; then
@@ -128,6 +130,26 @@ check_file_integrity() {
         fi
     fi
     
+    # Check for lib/commands directory
+    if [[ ! -d "lib/commands" ]]; then
+        log_error "lib/commands directory not found in current directory!"
+        log_info "Please re-clone the LAM repository and try again"
+        exit 1
+    else
+        # Validate all required command modules exist
+        for module in "${required_command_modules[@]}"; do
+            if [[ ! -f "lib/commands/$module" ]]; then
+                missing_command_modules+=("$module")
+            fi
+        done
+        
+        if [[ ${#missing_command_modules[@]} -gt 0 ]]; then
+            log_error "Missing required command modules: ${missing_command_modules[*]}"
+            log_info "Please re-clone the LAM repository and try again"
+            exit 1
+        fi
+    fi
+    
     # Check for VERSION file
     if [[ ! -f "VERSION" ]]; then
         log_warning "VERSION file not found - version will show as 'unknown'"
@@ -150,7 +172,7 @@ install_lam() {
     fi
     
     # Create directory structure
-    mkdir -p "$lam_install_dir/lib"
+    mkdir -p "$lam_install_dir/lib/commands"
     log_info "Creating LAM library directory: $lam_install_dir"
     
     # Install main executable
@@ -165,6 +187,12 @@ install_lam() {
     for module in "${required_modules[@]}"; do
         cp "lib/$module" "$lam_install_dir/lib/"
         chmod 644 "$lam_install_dir/lib/$module"
+    done
+    
+    # Install command modules
+    for module in "${required_command_modules[@]}"; do
+        cp "lib/commands/$module" "$lam_install_dir/lib/commands/"
+        chmod 644 "$lam_install_dir/lib/commands/$module"
     done
     
     # Create wrapper script in bin directory
