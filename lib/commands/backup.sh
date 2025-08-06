@@ -178,34 +178,31 @@ backup_list() {
         backup_size=$(du -h "$backup_path" 2>/dev/null | cut -f1)
         local backup_date
         backup_date=$(stat -c %y "$backup_path" 2>/dev/null | cut -d'.' -f1)
-        
+
         echo "📦 $backup_file"
-        echo "   Size: $backup_size"
-        echo "   Created: $backup_date"
         
         # Try to extract metadata if available
         local metadata
         if metadata=$(tar -xzOf "$backup_path" "lam-config/backup-metadata.json" 2>/dev/null); then
             local profile_count
             profile_count=$(echo "$metadata" | jq -r '.profile_count' 2>/dev/null)
-            local backup_name
-            backup_name=$(echo "$metadata" | jq -r '.backup_name' 2>/dev/null)
             local lam_version
             lam_version=$(echo "$metadata" | jq -r '.lam_version' 2>/dev/null)
             
-            if [[ "$backup_name" != "auto" && "$backup_name" != "null" ]]; then
-                echo "   Name: $backup_name"
-            fi
-            echo "   Profiles: $profile_count"
-            echo "   LAM Version: $lam_version"
+            log_gray " ├─ Profiles: $profile_count"
+            log_gray " ├─ LAM Version: $lam_version"
         fi
+        
+        log_gray " ├─ Size: $backup_size"
+        log_gray " └─ Created: $backup_date"
         echo
+
     done <<< "$backups"
     
-    echo "Commands:"
-    echo "• lam backup restore <filename>  # Restore a backup"
-    echo "• lam backup info <filename>     # Show detailed backup info"
-    echo "• lam backup delete <filename>   # Delete a backup"
+    log_info "💡 More Operations:"
+    log_gray "• Restore a backup: lam backup restore <filename>"
+    log_gray "• Show detailed info: lam backup info <filename>"
+    log_gray "• Delete a backup: lam backup delete <filename>"
 }
 
 # Restore a backup
