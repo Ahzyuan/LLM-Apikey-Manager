@@ -1,42 +1,36 @@
 #!/bin/bash
 
-# LAM Backup Commands Module
+# LAM Backup Commands
 # All backup management functionality
 
 # Enhanced backup management system
 cmd_backup() {
-    local action="${1:-create}"
+    local action="${1:-help}"
     local backup_name="${2:-}"
     
     case "$action" in
-        "create"|"c")
+        "create")
             backup_create "$backup_name"
             ;;
-        "list"|"ls"|"l")
+        "list"|"ls")
             backup_list
             ;;
-        "restore"|"load"|"r")
+        "load")
             backup_restore "$backup_name"
             ;;
-        "delete"|"del"|"d")
+        "delete"|"del")
             backup_delete "$backup_name"
             ;;
-        "info"|"i")
+        "info")
             backup_info "$backup_name"
             ;;
-        "help"|"h")
+        "help"|"-h")
             backup_help
             ;;
         *)
-            # Default behavior for backward compatibility
-            if [[ "$action" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-                # If first argument looks like a filename, treat it as create with custom name
-                backup_create "$action"
-            else
-                log_error "Invalid backup action: $action"
-                backup_help
-                return 1
-            fi
+            log_error "Invalid backup action: $action"
+            backup_help
+            return 1
             ;;
     esac
 }
@@ -63,7 +57,7 @@ backup_create() {
             log_error "Invalid backup name. Use only alphanumeric characters, dots, dashes, and underscores."
             return 1
         fi
-        backup_file="lam-backup-${backup_name}-$(date +%Y%m%d-%H%M%S).tar.gz"
+        backup_file="${backup_name}-$(date +%Y%m%d-%H%M%S).tar.gz"
     else
         backup_file="lam-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
     fi
@@ -73,6 +67,9 @@ backup_create() {
     if [[ ! -d "$backup_dir" ]]; then
         if ! mkdir -p "$backup_dir"; then
             log_error "Failed to create backup directory: $backup_dir"
+            log_info "Please check your permissions and try again."
+            log_info "Or you can manually create it by running:"
+            log_gray "  mkdir -p $backup_dir && chmod 700 $backup_dir"
             return 1
         fi
         chmod 700 "$backup_dir"
@@ -81,6 +78,7 @@ backup_create() {
     local backup_path="$backup_dir/$backup_file"
     
     log_info "Creating backup..."
+    echo
     
     # Get current configuration for metadata
     local config
@@ -117,9 +115,9 @@ EOF
             log_info "Profiles backed up: $profile_count"
             echo
             log_info "💡 Backup Management Commands:"
-            log_gray "   lam backup list                    # List all backups"
-            log_gray "   lam backup restore $backup_file    # Restore this backup"
-            log_gray "   lam backup info $backup_file       # Show backup details"
+            log_gray "• List all backups: lam backup list"
+            log_gray "• Restore this backup: lam backup restore $backup_file"
+            log_gray "• Show backup details: lam backup info $backup_file"
         else
             log_error "Failed to create backup archive"
             log_info "Possible causes and solutions:"
@@ -133,7 +131,12 @@ EOF
         if tar -czf "$backup_path" -C "$(dirname "$CONFIG_DIR")" "$(basename "$CONFIG_DIR")/" 2>/dev/null; then
             log_success "Backup created: $backup_file"
             log_info "Location: $backup_path"
-            log_warning "Note: Backup created without metadata (configuration not accessible)"
+            echo
+            log_warning "Backup created without metadata (configuration not accessible)"
+            log_info "To create a complete backup with metadata:"
+            log_info "• Ensure your session is active by running 'lam status' first"
+            log_info "• Then retry: lam backup create"
+            
         else
             log_error "Failed to create backup"
             log_info "Possible causes and solutions:"
@@ -156,7 +159,7 @@ backup_list() {
     fi
     
     local backups
-    backups=$(find "$backup_dir" -name "lam-backup-*.tar.gz" -type f 2>/dev/null | sort -r)
+    backups=$(find "$backup_dir" -name "*-*.tar.gz" -type f 2>/dev/null | sort -r)
     
     if [[ -z "$backups" ]]; then
         log_info "No backups found in $backup_dir"

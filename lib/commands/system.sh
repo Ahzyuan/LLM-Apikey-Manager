@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# LAM System Commands Module
-# Tool management: status, update, uninstall
+# LAM System Related Commands
+# Functions: status, update, uninstall
 
 # Show LAM status and statistics
 cmd_status() {
@@ -237,6 +237,16 @@ cmd_uninstall() {
         echo
     fi
     
+    # Check for LAM backup directory
+    local backup_dir="$HOME/.lam-backups"
+    if [[ -d "$backup_dir" ]]; then
+        echo "• LAM backup directory: $backup_dir"
+        local backup_count
+        backup_count=$(find "$backup_dir" -name "*.tar.gz" 2>/dev/null | wc -l)
+        log_gray "  (contains $backup_count configuration backup(s))"
+        echo
+    fi
+    
     # Check for backup files
     local backup_files=()
     for potential_backup in "$wrapper_script.backup" "$lib_dir/lam.backup" "$current_script.backup"; do
@@ -246,9 +256,9 @@ cmd_uninstall() {
     done
     
     if [[ ${#backup_files[@]} -gt 0 ]]; then
-        echo "• Backup files:"
+        echo "• Installation backup files:"
         for backup in "${backup_files[@]}"; do
-            echo "  ✣ $backup"
+            echo "  • $backup"
         done
         echo
     fi
@@ -284,13 +294,24 @@ cmd_uninstall() {
         fi
     fi
     
-    # Remove backup files
+    # Remove LAM backup directory
+    if [[ -d "$backup_dir" ]]; then
+        if rm -rf "$backup_dir"; then
+            log_success "Removed LAM backup directory and all backups"
+        else
+            log_error "Failed to remove LAM backup directory"
+            log_info "You can manually delete this directory by running 'rm -rf $backup_dir'."
+            echo
+        fi
+    fi
+    
+    # Remove installation backup files
     for backup in "${backup_files[@]}"; do
         if [[ -f "$backup" ]]; then
             if rm -f "$backup"; then
-                log_success "Removed backup file: $backup"
+                log_success "Removed installation backup file: $backup"
             else
-                log_warning "Failed to remove backup file: $backup"
+                log_warning "Failed to remove installation backup file: $backup"
                 log_info "You can manually delete this file by running 'rm -f $backup'."
                 echo
             fi

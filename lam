@@ -93,7 +93,7 @@ main() {
             cmd_test
             ;;
         "backup"|"bak")
-            cmd_backup "${2:-}"
+            cmd_backup "${2:-}" "${3:-}"
             ;;
         "status")
             cmd_status
