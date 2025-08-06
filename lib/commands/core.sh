@@ -690,12 +690,12 @@ cmd_delete() {
     if [[ -z "$name" ]]; then
         log_error "Profile name is required!"
         echo "Usage: lam delete <profile_name>"
-        return 1
+        exit 1
     fi
     
     local config
     if ! config=$(get_session_config); then
-        return 1
+        exit 1
     fi
     
     local profile
@@ -706,24 +706,23 @@ cmd_delete() {
         echo
         log_info "Available profiles:"
         echo "$config" | jq -r '.profiles | keys[]' | sed 's/^/• /'
-        return 1
+        exit 1
     fi
     
     # Show profile details before deletion
-    echo "Profile to delete:"
+    echo -e "${RED}Profile to delete${NC}"
     echo "=================="
     local description
     description=$(echo "$profile" | jq -r '.description // "No description"')
-    echo "Name: $name"
-    echo "Description: $description"
-    echo "Environment Variables:"
+    echo -e "${PURPLE}Name${NC}: $name"
+    echo -e "${PURPLE}Description${NC}: $description"
     local env_vars
-    env_vars=$(echo "$profile" | jq -r '.env_vars')
-    echo "$env_vars" | jq -r 'keys[]' | sed 's/^/• /'
+    env_vars=$(echo "$profile" | jq -r '.env_vars | keys | join(", ")')
+    echo -e "${PURPLE}Environment Variables${NC}: $env_vars"
     echo
     
     log_warning "⚠️  This action cannot be undone!"
-    echo -n "Are you sure you want to delete profile '$name'? (y/N): "
+    echo -en "${RED}Are you sure you want to delete profile '$name'?${NC} (y/N): "
     local confirm
     if ! read -r confirm; then
         log_error "Failed to read confirmation"
