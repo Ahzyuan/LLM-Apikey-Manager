@@ -393,6 +393,12 @@ backup_load() {
         return 0
     fi
     
+    # Verify master password for security
+    echo
+    if ! get_verified_master_password; then
+        exit 1
+    fi
+    
     echo
     log_info "Restoring backup..."
     
@@ -461,6 +467,12 @@ backup_delete() {
     if ! read -r confirm || [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         log_info "Deletion cancelled."
         return 0
+    fi
+    
+    # Verify master password for security
+    echo
+    if ! get_verified_master_password; then
+        exit 1
     fi
     
     if rm -f "$backup_path"; then
