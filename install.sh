@@ -31,7 +31,7 @@ log_error() {
 
 # Check dependencies
 check_dependencies() {
-    local deps=("jq" "openssl")
+    local deps=("jq" "openssl" "curl" "tar")
     local missing_deps=()
 
     log_info "Checking dependencies..."

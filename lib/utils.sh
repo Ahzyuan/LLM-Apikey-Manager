@@ -129,6 +129,14 @@ check_dependencies() {
         missing_deps+=("openssl")
     fi
     
+    if ! command -v curl >/dev/null 2>&1; then
+        missing_deps+=("curl")
+    fi
+    
+    if ! command -v tar >/dev/null 2>&1; then
+        missing_deps+=("tar")
+    fi
+    
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
         log_error "Missing required dependencies: ${missing_deps[*]}"
         echo
