@@ -35,6 +35,79 @@ cmd_backup() {
     esac
 }
 
+_interactive_selection() {
+    local backup_file="$1"
+    local backup_dir="$HOME/.lam-backups"
+    local backup_path="$backup_dir/$backup_file"
+    
+    # Check if backup directory exists
+    if [[ ! -d "$backup_dir" ]]; then
+        log_error "Backup directory does not exist: $backup_dir"
+        log_info "No backups have been created yet. Use 'lam backup create [name]' to create your first backup."
+        exit 1
+    fi
+    
+    # Get available backup files (using portable approach)
+    local backup_files=()
+    for file in "$backup_dir"/*.tar.gz; do
+        if [[ -f "$file" ]]; then
+            backup_files+=("$(basename "$file")")
+        fi
+    done
+    
+    # Sort the array in reverse order (newest first) if we have files
+    if [[ ${#backup_files[@]} -gt 0 ]]; then
+        IFS=$'\n' backup_files=($(printf '%s\n' "${backup_files[@]}" | sort -r))
+        unset IFS
+    fi
+    
+    if [[ ${#backup_files[@]} -eq 0 ]]; then
+        log_error "No backup files found in $backup_dir"
+        log_info "Use 'lam backup create [name]' to create your first backup."
+        exit 1
+    fi
+    
+    # Handle backup file selection
+    if [[ -z "$backup_file" ]] || [[ ! -f "$backup_path" ]]; then
+        if [[ -n "$backup_file" ]]; then
+            log_error "Backup file not found: $backup_file"
+            echo >&2
+        else
+            log_error "Backup filename is required"
+            echo >&2
+        fi
+        
+        log_info "Available backup files:"
+        for ((i=0; i<${#backup_files[@]}; i++)); do
+            echo "  $((i+1)). ${backup_files[i]}" >&2
+        done
+        echo >&2
+        echo -en "Select a backup by number (1-${#backup_files[@]}), or press Enter to cancel: " >&2
+        local selection
+        if ! read -r selection; then
+            log_error "Failed to read selection"
+            exit 1
+        fi
+        
+        if [[ -z "$selection" ]]; then
+            log_info "Operation cancelled."
+            exit 0
+        fi
+        
+        if [[ ! "$selection" =~ ^[0-9]+$ ]] || [[ "$selection" -lt 1 ]] || [[ "$selection" -gt ${#backup_files[@]} ]]; then
+            log_error "Invalid selection. Please choose a number between 1 and ${#backup_files[@]}."
+            exit 1
+        fi
+        
+        backup_file="${backup_files[$((selection-1))]}"
+        backup_path="$backup_dir/$backup_file"
+        log_info "Selected backup: $backup_file"
+        echo >&2
+    fi
+
+    echo "$backup_path"
+}
+
 # Create a new backup
 backup_create() {
     local backup_name="$1"
@@ -224,64 +297,10 @@ backup_list() {
 # Show detailed backup information
 backup_info() {
     local backup_file="$1"
-    local backup_dir="$HOME/.lam-backups"
-    local backup_path="$backup_dir/$backup_file"
+    local backup_path
     
-    # Check if backup directory exists
-    if [[ ! -d "$backup_dir" ]]; then
-        log_error "Backup directory does not exist: $backup_dir"
-        log_info "No backups have been created yet. Use 'lam backup create [name]' to create your first backup."
-        exit 1
-    fi
-    
-    # Get available backup files
-    local backup_files
-    backup_files=($(find "$backup_dir" -name "*.tar.gz" -type f -printf "%f\n" 2>/dev/null | sort -r))
-    
-    if [[ ${#backup_files[@]} -eq 0 ]]; then
-        log_error "No backup files found in $backup_dir"
-        log_info "Use 'lam backup create [name]' to create your first backup."
-        exit 1
-    fi
-    
-    # Handle backup file selection
-    if [[ -z "$backup_file" ]] || [[ ! -f "$backup_path" ]]; then
-        if [[ -n "$backup_file" ]]; then
-            log_error "Backup file not found: $backup_file"
-            echo
-        else
-            log_error "Backup filename is required"
-            echo
-        fi
-        
-        log_info "Available backup files:"
-        for ((i=0; i<${#backup_files[@]}; i++)); do
-            echo "  $((i+1)). ${backup_files[i]}"
-        done
-        echo
-        echo -en "Select a backup by number (1-${#backup_files[@]}), or press Enter to cancel: "
-        local selection
-        if ! read -r selection; then
-            log_error "Failed to read selection"
-            exit 1
-        fi
-        
-        if [[ -z "$selection" ]]; then
-            log_info "Operation cancelled."
-            exit 0
-        fi
-        
-        if [[ ! "$selection" =~ ^[0-9]+$ ]] || [[ "$selection" -lt 1 ]] || [[ "$selection" -gt ${#backup_files[@]} ]]; then
-            log_error "Invalid selection. Please choose a number between 1 and ${#backup_files[@]}."
-            exit 1
-        fi
-        
-        backup_file="${backup_files[$((selection-1))]}"
-        backup_path="$backup_dir/$backup_file"
-        echo
-        log_info "Selected backup: $backup_file"
-        echo
-    fi
+    backup_path=$(_interactive_selection "$backup_file")
+    backup_file=$(basename "$backup_path")
     
     echo -e "${BLUE}Backup Information${NC}"
     echo "=================="
@@ -352,32 +371,13 @@ backup_info() {
 # Restore a backup
 backup_restore() {
     local backup_file="$1"
-    
-    if [[ -z "$backup_file" ]]; then
-        log_error "Backup filename is required"
-        echo "Usage: lam backup restore <backup_filename>"
-        echo
-        log_info "Available backups:"
-        backup_list
-        return 1
-    fi
-    
-    local backup_dir="$HOME/.lam-backups"
-    local backup_path="$backup_dir/$backup_file"
-    
-    # Check if backup exists
-    if [[ ! -f "$backup_path" ]]; then
-        log_error "Backup file not found: $backup_file"
-        echo
-        log_info "Available backups:"
-        backup_list
-        return 1
-    fi
+    local backup_path
+
+    backup_path=$(_interactive_selection "$backup_file")
+    backup_file=$(basename "$backup_path")
     
     # Show backup information
-    echo "Backup Information:"
-    echo "=================="
-    backup_info "$backup_file" --no-header
+    backup_info "$backup_file"
     echo
     
     # Confirm restoration
@@ -453,35 +453,17 @@ backup_restore() {
 # Delete a backup
 backup_delete() {
     local backup_file="$1"
+    local backup_path
     
-    if [[ -z "$backup_file" ]]; then
-        log_error "Backup filename is required"
-        echo "Usage: lam backup delete <backup_filename>"
-        echo
-        log_info "Available backups:"
-        backup_list
-        return 1
-    fi
-    
-    local backup_dir="$HOME/.lam-backups"
-    local backup_path="$backup_dir/$backup_file"
-    
-    if [[ ! -f "$backup_path" ]]; then
-        log_error "Backup file not found: $backup_file"
-        echo
-        log_info "Available backups:"
-        backup_list
-        return 1
-    fi
+    backup_path=$(_interactive_selection "$backup_file")
+    backup_file=$(basename "$backup_path")
     
     # Show backup info before deletion
-    echo "Backup to delete:"
-    echo "================"
-    backup_info "$backup_file" --no-header
+    backup_info "$backup_file"
     echo
     
     log_warning "⚠️  This action cannot be undone!"
-    echo -n "Are you sure you want to delete this backup? (y/N): "
+    echo -en "${RED}Are you sure you want to delete this backup?${NC} (y/N): "
     local confirm
     if ! read -r confirm || [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         log_info "Deletion cancelled."
@@ -492,7 +474,10 @@ backup_delete() {
         log_success "Backup deleted: $backup_file"
     else
         log_error "Failed to delete backup"
-        return 1
+        log_info "Please check your permissions and try again."
+        log_info "Or you can manually delete it by running:"
+        log_gray "  rm -f $backup_path"
+        exit 1
     fi
 }
 
