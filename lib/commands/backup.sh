@@ -15,14 +15,14 @@ cmd_backup() {
         "list"|"ls")
             backup_list
             ;;
+        "info")
+            backup_info "$backup_name"
+            ;;
         "load")
             backup_restore "$backup_name"
             ;;
         "delete"|"del")
             backup_delete "$backup_name"
-            ;;
-        "info")
-            backup_info "$backup_name"
             ;;
         "help"|"-h")
             backup_help
@@ -86,6 +86,20 @@ backup_create() {
         local profile_count
         profile_count=$(echo "$config" | jq -r '.profiles | length' 2>/dev/null || echo "0")
         
+        # Extract profile information
+        local profile_names
+        local profile_details
+        profile_names=$(echo "$config" | jq -r '.profiles | keys[]' 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+        
+        # Create profile details array with comprehensive info (without sensitive values)
+        profile_details=$(echo "$config" | jq -c '.profiles | to_entries | map({
+            name: .key,
+            env_var_names: (.value.env_vars | keys),
+            model_name: (.value.model_name // "not specified"),
+            description: (.value.description // "no description"),
+            created: (.value.created // "unknown")
+        })' 2>/dev/null || echo '[]')
+        
         # Create backup with metadata
         local temp_dir
         if ! temp_dir=$(mktemp -d); then
@@ -97,14 +111,16 @@ backup_create() {
         # Copy configuration
         cp -r "$CONFIG_DIR" "$temp_dir/lam-config"
         
-        # Create metadata file
+        # Create metadata file with profile information
         cat > "$temp_dir/lam-config/backup-metadata.json" << EOF
 {
     "backup_created": "$(date -Iseconds)",
     "lam_version": "$(get_version_info | cut -d'|' -f1)",
     "profile_count": $profile_count,
     "backup_name": "${backup_name:-auto}",
-    "original_config_dir": "$CONFIG_DIR"
+    "original_config_dir": "$CONFIG_DIR",
+    "profile_names": "$profile_names",
+    "profile_details": $profile_details
 }
 EOF
         
@@ -135,7 +151,7 @@ EOF
             log_warning "Backup created without metadata (configuration not accessible)"
             log_info "To create a complete backup with metadata:"
             log_info "• Ensure your session is active by running 'lam status' first"
-            log_info "• Then retry: lam backup create"
+            log_info "• Then retry: lam backup create [name]"
             
         else
             log_error "Failed to create backup"
@@ -167,7 +183,7 @@ backup_list() {
         return 0
     fi
     
-    echo "Available LAM Backups:"
+    echo -e "${BLUE}Available LAM Backups${NC}"
     echo "====================="
     echo
     
@@ -179,7 +195,7 @@ backup_list() {
         local backup_date
         backup_date=$(stat -c %y "$backup_path" 2>/dev/null | cut -d'.' -f1)
 
-        echo "📦 $backup_file"
+        log_purple "📦 $backup_file"
         
         # Try to extract metadata if available
         local metadata
@@ -203,6 +219,134 @@ backup_list() {
     log_gray "• Restore a backup: lam backup restore <filename>"
     log_gray "• Show detailed info: lam backup info <filename>"
     log_gray "• Delete a backup: lam backup delete <filename>"
+}
+
+# Show detailed backup information
+backup_info() {
+    local backup_file="$1"
+    local backup_dir="$HOME/.lam-backups"
+    local backup_path="$backup_dir/$backup_file"
+    
+    # Check if backup directory exists
+    if [[ ! -d "$backup_dir" ]]; then
+        log_error "Backup directory does not exist: $backup_dir"
+        log_info "No backups have been created yet. Use 'lam backup create [name]' to create your first backup."
+        exit 1
+    fi
+    
+    # Get available backup files
+    local backup_files
+    backup_files=($(find "$backup_dir" -name "*.tar.gz" -type f -printf "%f\n" 2>/dev/null | sort -r))
+    
+    if [[ ${#backup_files[@]} -eq 0 ]]; then
+        log_error "No backup files found in $backup_dir"
+        log_info "Use 'lam backup create [name]' to create your first backup."
+        exit 1
+    fi
+    
+    # Handle backup file selection
+    if [[ -z "$backup_file" ]] || [[ ! -f "$backup_path" ]]; then
+        if [[ -n "$backup_file" ]]; then
+            log_error "Backup file not found: $backup_file"
+            echo
+        else
+            log_error "Backup filename is required"
+            echo
+        fi
+        
+        log_info "Available backup files:"
+        for ((i=0; i<${#backup_files[@]}; i++)); do
+            echo "  $((i+1)). ${backup_files[i]}"
+        done
+        echo
+        echo -en "Select a backup by number (1-${#backup_files[@]}), or press Enter to cancel: "
+        local selection
+        if ! read -r selection; then
+            log_error "Failed to read selection"
+            exit 1
+        fi
+        
+        if [[ -z "$selection" ]]; then
+            log_info "Operation cancelled."
+            exit 0
+        fi
+        
+        if [[ ! "$selection" =~ ^[0-9]+$ ]] || [[ "$selection" -lt 1 ]] || [[ "$selection" -gt ${#backup_files[@]} ]]; then
+            log_error "Invalid selection. Please choose a number between 1 and ${#backup_files[@]}."
+            exit 1
+        fi
+        
+        backup_file="${backup_files[$((selection-1))]}"
+        backup_path="$backup_dir/$backup_file"
+        echo
+        log_info "Selected backup: $backup_file"
+        echo
+    fi
+    
+    echo -e "${BLUE}Backup Information${NC}"
+    echo "=================="
+    echo -e "${PURPLE}• File${NC}: $backup_file"
+    echo -e "${PURPLE}• Path${NC}: $backup_path"
+    
+    # Basic file information
+    local backup_size
+    backup_size=$(du -h "$backup_path" 2>/dev/null | cut -f1)
+    local backup_date
+    backup_date=$(stat -c %y "$backup_path" 2>/dev/null | cut -d'.' -f1)
+    
+    echo -e "${PURPLE}• Created${NC}: $backup_date"
+    echo -e "${PURPLE}• Size${NC}: $backup_size"
+    
+    # Try to extract and show metadata
+    local metadata
+    if metadata=$(tar -xzOf "$backup_path" "lam-config/backup-metadata.json" 2>/dev/null); then
+        echo -e "${PURPLE}• LAM Version${NC}: $(echo "$metadata" | jq -r '.lam_version')"
+        echo -e "${PURPLE}• Original Config${NC}: $(echo "$metadata" | jq -r '.original_config_dir')"
+                
+        # Show profile details if available
+        local profile_details
+        profile_details=$(echo "$metadata" | jq -r '.profile_details // empty' 2>/dev/null)
+        if [[ -n "$profile_details" && "$profile_details" != "null" && "$profile_details" != "[]" ]]; then
+            echo 
+            echo -e "${BLUE}Profile Details${NC}"
+            echo "=================="
+            # Parse and display each profile individually
+            local profile_count
+            profile_count=$(echo "$profile_details" | jq length 2>/dev/null || echo 0)
+            
+            for ((i=0; i<profile_count; i++)); do
+                local profile
+                profile=$(echo "$profile_details" | jq ".[$i]" 2>/dev/null)
+                
+                if [[ -n "$profile" && "$profile" != "null" ]]; then
+                    local name model_name description created env_vars
+                    name=$(echo "$profile" | jq -r '.name // "unknown"')
+                    model_name=$(echo "$profile" | jq -r '.model_name // "not specified"')
+                    description=$(echo "$profile" | jq -r '.description // "no description"')
+                    env_vars=$(echo "$profile" | jq -r '.env_var_names | join(", ")' 2>/dev/null || echo "none")
+                    created=$(echo "$profile" | jq -r '.created // "unknown"')
+                    
+                    log_gray "${PURPLE}• Profile-$((i+1)): $name${NC}"
+                    log_gray "├─ Model Name: $model_name"
+                    log_gray "├─ Description: $description"
+                    log_gray "├─ Environment Variables: $env_vars"
+                    log_gray "└─ Created: $created"
+                    
+                    # Add spacing between profiles (except for the last one)
+                    if [[ $((i + 1)) -lt $profile_count ]]; then
+                        echo
+                    fi
+                fi
+            done
+        fi
+        
+    else
+        echo
+        log_info "No metadata available, the profile details are inaccessible."
+        log_info "To create a complete backup with metadata:"
+        log_info "• Ensure your session is active by running 'lam status' first"
+        log_info "• Then retry: lam backup create [name]"
+    fi
 }
 
 # Restore a backup
@@ -349,70 +493,6 @@ backup_delete() {
     else
         log_error "Failed to delete backup"
         return 1
-    fi
-}
-
-# Show detailed backup information
-backup_info() {
-    local backup_file="$1"
-    local show_header="${2:-show}"
-    
-    if [[ -z "$backup_file" ]]; then
-        log_error "Backup filename is required"
-        echo "Usage: lam backup info <backup_filename>"
-        echo
-        log_info "Available backups:"
-        backup_list
-        return 1
-    fi
-    
-    local backup_dir="$HOME/.lam-backups"
-    local backup_path="$backup_dir/$backup_file"
-    
-    if [[ ! -f "$backup_path" ]]; then
-        log_error "Backup file not found: $backup_file"
-        echo
-        log_info "Available backups:"
-        backup_list
-        return 1
-    fi
-    
-    if [[ "$show_header" != "--no-header" ]]; then
-        echo "Backup Information:"
-        echo "=================="
-    fi
-    
-    echo "File: $backup_file"
-    echo "Path: $backup_path"
-    
-    # Basic file information
-    local backup_size
-    backup_size=$(du -h "$backup_path" 2>/dev/null | cut -f1)
-    local backup_date
-    backup_date=$(stat -c %y "$backup_path" 2>/dev/null | cut -d'.' -f1)
-    
-    echo "Size: $backup_size"
-    echo "Created: $backup_date"
-    
-    # Try to extract and show metadata
-    local metadata
-    if metadata=$(tar -xzOf "$backup_path" "lam-config/backup-metadata.json" 2>/dev/null); then
-        echo
-        echo "Backup Details:"
-        echo "• Profile Count: $(echo "$metadata" | jq -r '.profile_count')"
-        echo "• LAM Version: $(echo "$metadata" | jq -r '.lam_version')"
-        echo "• Backup Name: $(echo "$metadata" | jq -r '.backup_name')"
-        echo "• Original Config: $(echo "$metadata" | jq -r '.original_config_dir')"
-        
-        # List profiles if possible
-        local profiles
-        if profiles=$(tar -xzOf "$backup_path" "lam-config/config.enc" 2>/dev/null); then
-            echo
-            echo "Note: Encrypted configuration found (profiles cannot be listed without password)"
-        fi
-    else
-        echo
-        echo "Legacy backup format (no metadata available)"
     fi
 }
 
