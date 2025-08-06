@@ -114,14 +114,37 @@ cmd_add() {
     
     log_info "Adding new API profile: $name"
     echo
-    log_info "Enter your API profile details:"
+    
+    # Collect Model Name (required)
+    local model_name
+    while true; do
+        echo -en "${BLUE}Model Name${NC} (required, e.g., gpt-4, claude-3-sonnet): "
+        if ! read -r model_name; then
+            log_error "Failed to read model name"
+            return 1
+        fi
+        
+        model_name=$(sanitize_input "$model_name")
+        if [[ -z "$model_name" ]]; then
+            log_error "Model name is required!"
+            continue
+        fi
+        
+        if [[ ${#model_name} -gt 100 ]]; then
+            log_error "Model name too long (max 100 characters)"
+            continue
+        fi
+        
+        break
+    done
+    log_success "Model: $model_name"
     echo
     
     # Initialize empty env_vars object
     local env_vars='{}'
     
     # Collect API Key
-    echo -en "${BLUE}API Key${NC} (e.g., OPENAI_API_KEY=sk-123... or API_KEY=your_key): "
+    echo -en "${BLUE}API Key${NC} (e.g., OPENAI_API_KEY=sk-123): "
     local api_key_input
     if ! read -r api_key_input; then
         log_error "Failed to read API key"
@@ -143,9 +166,11 @@ cmd_add() {
     fi
     
     env_vars=$(echo "$env_vars" | jq --arg key "$api_key_name" --arg value "$api_key_value" '.[$key] = $value')
+    log_success "Added: $api_key_name=***"
+    echo
     
     # Collect Base URL (optional)
-    echo -en "${BLUE}Base URL${NC} (optional, e.g., OPENAI_BASE_URL=https://api.openai.com/v1 or BASE_URL=your_url): "
+    echo -en "${BLUE}Base URL${NC} (optional, e.g., OPENAI_BASE_URL=https://api.openai.com/v1): "
     local base_url_input
     if ! read -r base_url_input; then
         log_error "Failed to read base URL"
@@ -167,13 +192,13 @@ cmd_add() {
         fi
         
         env_vars=$(echo "$env_vars" | jq --arg key "$base_url_name" --arg value "$base_url_value" '.[$key] = $value')
+        log_success "Added: $base_url_name=$base_url_value"
+    else
+        log_info "Base URL: (skipped)"
     fi
+    echo
     
     # Collect additional environment variables
-    echo
-    log_info "Add additional environment variables (optional):"
-    log_gray "Press Enter with empty input to finish"
-    
     while true; do
         echo -en "${BLUE}Additional ENV${NC} (KEY=VALUE format, or press Enter to finish): "
         local additional_env
@@ -184,6 +209,7 @@ cmd_add() {
         
         # If empty, break the loop
         if [[ -z "$additional_env" ]]; then
+            log_info "No additional environment variables added."
             break
         fi
         
@@ -203,6 +229,7 @@ cmd_add() {
         env_vars=$(echo "$env_vars" | jq --arg key "$env_name" --arg value "$env_value" '.[$key] = $value')
         log_success "Added: $env_name"
     done
+    echo
     
     # Collect description (optional)
     echo -en "${BLUE}Description${NC} (optional): "
@@ -216,15 +243,19 @@ cmd_add() {
     if [[ -z "$description" ]]; then
         description="No description provided"
     fi
+    log_success "Description: $description"
+    echo
     
     # Create profile object
     local profile_data
     profile_data=$(jq -n \
         --argjson env_vars "$env_vars" \
+        --arg model_name "$model_name" \
         --arg description "$description" \
         --arg created "$(date -Iseconds)" \
         '{
             env_vars: $env_vars,
+            model_name: $model_name,
             description: $description,
             created: $created,
             last_used: null
@@ -249,7 +280,7 @@ cmd_add() {
     log_info "Environment variables configured:"
     echo "$env_vars" | jq -r 'to_entries[] | "• \(.key)"'
     echo
-    log_info "To use this profile, run: lam use $name"
+    log_info "💡 To use this profile, run: lam use $name"
 }
 
 # List all profiles with enhanced formatting
