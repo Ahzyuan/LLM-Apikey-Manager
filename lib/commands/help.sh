@@ -40,9 +40,9 @@ COMMANDS:
     • backup <action>         Comprehensive backup management
       ├─ create [name]         • Create backup (optionally with custom name)
       ├─ list                  • List all available backups
+      ├─ info <file>           • Show detailed backup information
       ├─ restore <file>        • Restore configuration from backup
       ├─ delete <file>         • Delete a backup file
-      ├─ info <file>           • Show detailed backup information
       └─ help                  • Show backup management help
     • upgrade, update         Upgrade LAM to latest version
     • uninstall               Completely remove LAM from system
