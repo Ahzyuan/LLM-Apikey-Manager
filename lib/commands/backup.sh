@@ -19,7 +19,7 @@ cmd_backup() {
             backup_info "$backup_name"
             ;;
         "load")
-            backup_restore "$backup_name"
+            backup_load "$backup_name"
             ;;
         "delete"|"del")
             backup_delete "$backup_name"
@@ -327,8 +327,8 @@ backup_info() {
         profile_details=$(echo "$metadata" | jq -r '.profile_details // empty' 2>/dev/null)
         if [[ -n "$profile_details" && "$profile_details" != "null" && "$profile_details" != "[]" ]]; then
             echo 
-            echo -e "${BLUE}Profile Details${NC}"
-            echo "=================="
+            echo -e "${BLUE}Profiles in Selected Backup${NC}"
+            echo "==========================="
             # Parse and display each profile individually
             local profile_count
             profile_count=$(echo "$profile_details" | jq length 2>/dev/null || echo 0)
@@ -369,7 +369,7 @@ backup_info() {
 }
 
 # Restore a backup
-backup_restore() {
+backup_load() {
     local backup_file="$1"
     local backup_path
 
@@ -386,22 +386,15 @@ backup_restore() {
         log_warning "   Your current profiles and settings will be lost."
     fi
     echo
-    echo -n "Are you sure you want to restore this backup? (y/N): "
+    echo -en "${RED}Are you sure you want to restore this backup?${NC} (y/N): "
     local confirm
     if ! read -r confirm || [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
         log_info "Restore cancelled."
         return 0
     fi
     
+    echo
     log_info "Restoring backup..."
-    
-    # Backup current configuration if it exists
-    if [[ -d "$CONFIG_DIR" ]]; then
-        local current_backup="$CONFIG_DIR.backup-before-restore-$(date +%s)"
-        if cp -r "$CONFIG_DIR" "$current_backup"; then
-            log_info "Current configuration backed up to: $current_backup"
-        fi
-    fi
     
     # Create temporary directory for extraction
     local temp_dir
@@ -429,7 +422,7 @@ backup_restore() {
         # Remove metadata file from restored config
         rm -f "$CONFIG_DIR/backup-metadata.json"
     else
-        # Old format - try to find lam directory
+        # legacy format - try to find lam directory
         local lam_dir
         lam_dir=$(find "$temp_dir" -name "lam" -type d | head -1)
         if [[ -n "$lam_dir" ]]; then
@@ -492,7 +485,7 @@ backup_help() {
     echo "    • create [name]           Create a new backup (optionally with custom name)"
     echo "    • list, ls                List all available backups"
     echo "    • info <filename>         Show detailed backup information"
-    echo "    • restore <filename>      Restore configuration from backup"
+    echo "    • load <filename>         Load configuration from backup"
     echo "    • delete, del <filename>  Delete a backup file"
     echo "    • help, -h                Show this help message"
     echo
@@ -506,6 +499,6 @@ backup_help() {
     log_gray "lam backup create my-bak             # Create backup with custom name"
     log_gray "lam backup list                      # List all backups"
     log_gray "lam backup info my-bak-20250730-143022.tar.gz"
-    log_gray "lam backup restore my-bak-20250730-143022.tar.gz"
+    log_gray "lam backup load my-bak-20250730-143022.tar.gz"
     log_gray "lam backup delete my-bak-20250730-143022.tar.gz"
 }

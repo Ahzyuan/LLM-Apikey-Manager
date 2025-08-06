@@ -41,7 +41,7 @@ COMMANDS:
       ├─ create [name]         • Create backup (optionally with custom name)
       ├─ list                  • List all available backups
       ├─ info <file>           • Show detailed backup information
-      ├─ restore <file>        • Restore configuration from backup
+      ├─ load <file>           • Load configuration from backup
       ├─ delete <file>         • Delete a backup file
       └─ help                  • Show backup management help
     • upgrade, update         Upgrade LAM to latest version
