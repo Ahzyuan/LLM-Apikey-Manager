@@ -468,12 +468,12 @@ cmd_edit() {
     if [[ -z "$name" ]]; then
         log_error "Profile name is required!"
         echo "Usage: lam edit <profile_name>"
-        return 1
+        exit 1
     fi
     
     local config
     if ! config=$(get_session_config); then
-        return 1
+        exit 1
     fi
     
     local profile
@@ -484,188 +484,227 @@ cmd_edit() {
         echo
         log_info "Available profiles:"
         echo "$config" | jq -r '.profiles | keys[]' | sed 's/^/• /'
-        return 1
+        exit 1
     fi
     
-    log_info "Editing profile: $name"
-    echo
-    
-    # Show current configuration
-    echo "Current Configuration:"
+    # Show current profile details
+    echo -e "${BLUE}Editing profile${NC}"
     echo "====================="
+    echo -e "${PURPLE}• Profile Name${NC}: $name"
     local description
     description=$(echo "$profile" | jq -r '.description // "No description"')
-    echo "Description: $description"
-    echo
-    echo "Environment Variables:"
+    echo -e "${PURPLE}• Description${NC}: $description"
     local env_vars
-    env_vars=$(echo "$profile" | jq -r '.env_vars')
-    while IFS= read -r key; do
-        local value
-        value=$(echo "$env_vars" | jq -r ".[\"$key\"]")
-        local masked_value
-        if [[ ${#value} -gt 8 ]]; then
-            masked_value="${value:0:4}...${value: -4}"
-        else
-            masked_value="***"
+    env_vars=$(echo "$profile" | jq -r '.env_vars | keys | join(", ")')
+    echo -e "${PURPLE}• Environment Variables${NC}: $env_vars"
+    
+    while true; do
+        echo
+        echo '-----------------------------'
+        echo "What would you like to edit?"
+        log_gray "1) Profile Name"
+        log_gray "2) Description"
+        log_gray "3) Environment Variables"
+        log_gray "4) Save Changes"
+        log_gray "5) Discard Changes"
+        echo
+        echo -n "Choose option (1-5): "
+        
+        local choice
+        if ! read -r choice; then
+            log_error "Failed to read choice"
+            exit 1
         fi
-        echo "• $key = $masked_value"
-    done <<< "$(echo "$env_vars" | jq -r 'keys[]')"
-    
-    echo
-    log_info "What would you like to edit?"
-    echo "1) Description"
-    echo "2) Environment Variables"
-    echo "3) Both"
-    echo "4) Cancel"
-    echo
-    echo -n "Choose option (1-4): "
-    
-    local choice
-    if ! read -r choice; then
-        log_error "Failed to read choice"
-        return 1
-    fi
-    
-    case "$choice" in
-        "1")
-            # Edit description only
-            echo -en "${BLUE}New Description${NC}: "
-            local new_description
-            if ! read -r new_description; then
-                log_error "Failed to read description"
-                return 1
-            fi
-            new_description=$(sanitize_input "$new_description")
-            if [[ -z "$new_description" ]]; then
-                new_description="No description provided"
-            fi
-            profile=$(echo "$profile" | jq --arg desc "$new_description" '.description = $desc')
-            ;;
-        "2")
-            # Edit environment variables only
-            log_info "Current environment variables will be replaced."
-            log_warning "This will remove all existing environment variables!"
-            echo -n "Continue? (y/N): "
-            local confirm
-            if ! read -r confirm || [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+
+        case "$choice" in
+            "1")
+                # Edit profile name
+                echo -en "${BLUE}New Profile Name${NC}: "
+                local new_name
+                if ! read -r new_name; then
+                    log_error "Failed to read new profile name"
+                    return 1
+                fi
+                
+                new_name=$(sanitize_input "$new_name")
+                if [[ -z "$new_name" ]]; then
+                    log_error "Profile name cannot be empty!"
+                    return 1
+                fi
+                
+                # Validate new profile name
+                if [[ ! "$new_name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+                    log_error "Profile name can only contain letters, numbers, hyphens, and underscores"
+                    return 1
+                fi
+                
+                if [[ ${#new_name} -gt 50 ]]; then
+                    log_error "Profile name too long (max 50 characters)"
+                    return 1
+                fi
+                
+                # Check if new name already exists
+                local existing_profile
+                existing_profile=$(echo "$config" | jq -r ".profiles[\"$new_name\"]" 2>/dev/null)
+                if [[ "$existing_profile" != "null" ]]; then
+                    log_error "Profile '$new_name' already exists!"
+                    return 1
+                fi
+                
+                # Remove old profile and add with new name
+                config=$(echo "$config" | jq --arg old_name "$name" --arg new_name "$new_name" --argjson profile "$profile" 'del(.profiles[$old_name]) | .profiles[$new_name] = $profile')
+                name="$new_name"  # Update name variable for success message
+                log_success "Profile name changed to: $new_name"
+                ;;
+            "2")
+                # Edit description only
+                echo -en "${BLUE}New Description${NC}: "
+                local new_description
+                if ! read -r new_description; then
+                    log_error "Failed to read description"
+                    return 1
+                fi
+                new_description=$(sanitize_input "$new_description")
+                if [[ -z "$new_description" ]]; then
+                    new_description="No description provided"
+                fi
+                profile=$(echo "$profile" | jq --arg desc "$new_description" '.description = $desc')
+                log_success "Description updated successfully: $new_description"
+                ;;
+            "3")
+                # Edit environment variables individually
+                local current_env_vars
+                current_env_vars=$(echo "$profile" | jq -r '.env_vars')
+                
+                echo
+                echo -e "${BLUE}Current environment variables${NC}"
+                echo "$current_env_vars" | jq -r 'keys[]' | while read -r key; do
+                    local value
+                    value=$(echo "$current_env_vars" | jq -r ".[\"$key\"]")
+                    local masked_value
+                    if [[ ${#value} -gt 8 ]]; then
+                        masked_value="${value:0:4}...${value: -4}"
+                    else
+                        masked_value="***"
+                    fi
+                    echo -e "${GREEN}• $key${NC} = $masked_value"
+                done
+                echo
+                
+                while true; do
+                    echo "What would you like to do?"
+                    log_gray "1) Add/Update environment variable"
+                    log_gray "2) Delete environment variable"
+                    log_gray "3) Cancel"
+                    echo
+                    echo -n "Choose option (1-3): "
+                    
+                    local env_choice
+                    if ! read -r env_choice; then
+                        log_error "Failed to read choice"
+                        return 1
+                    fi
+
+                    echo '-------------------------------------'
+                    
+                    case "$env_choice" in
+                        "1")
+                            # Add new environment variable
+                            echo -en "${BLUE}New Environment Variable${NC} (KEY=VALUE): "
+                            local new_env_input
+                            if ! read -r new_env_input; then
+                                log_error "Failed to read environment variable"
+                                continue
+                            fi
+                            
+                            new_env_input=$(sanitize_input "$new_env_input")
+                            if [[ ! "$new_env_input" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+$ ]]; then
+                                log_error "Invalid format! Use KEY=VALUE"
+                                continue
+                            fi
+                            
+                            local new_env_name="${new_env_input%%=*}"
+                            local new_env_value="${new_env_input#*=}"
+                            
+                            if ! validate_env_key "$new_env_name" || ! validate_env_value "$new_env_value"; then
+                                continue
+                            fi
+                            
+                            # Check if key already exists
+                            local existing_value
+                            existing_value=$(echo "$current_env_vars" | jq -r ".[\"$new_env_name\"] // null")
+                            if [[ "$existing_value" != "null" ]]; then
+                                log_warning "Environment variable '$new_env_name' already exists!"
+                                echo -n "Overwrite? (y/N): "
+                                local overwrite_confirm
+                                if ! read -r overwrite_confirm || [[ "$overwrite_confirm" != "y" && "$overwrite_confirm" != "Y" ]]; then
+                                    continue
+                                fi
+                            fi
+                            
+                            current_env_vars=$(echo "$current_env_vars" | jq --arg key "$new_env_name" --arg value "$new_env_value" '.[$key] = $value')
+                            log_success "Added/Updated: $new_env_name"
+                            ;;
+                        "2")
+                            local env_keys
+                            env_keys=($(echo "$current_env_vars" | jq -r 'keys[]'))
+                            
+                            if [[ ${#env_keys[@]} -eq 0 ]]; then
+                                log_warning "No environment variables to delete!"
+                                continue
+                            fi
+                            
+                            echo -e "${BLUE}Select environment variable to delete${NC}"
+                            for ((i=0; i<${#env_keys[@]}; i++)); do
+                                log_gray "$((i+1)). ${env_keys[i]}"
+                            done
+                            echo
+                            echo -n "Choose variable to delete (1-${#env_keys[@]}): "
+                            
+                            local delete_choice
+                            if ! read -r delete_choice; then
+                                log_error "Failed to read choice"
+                                continue
+                            fi
+                            
+                            if [[ ! "$delete_choice" =~ ^[0-9]+$ ]] || [[ "$delete_choice" -lt 1 ]] || [[ "$delete_choice" -gt ${#env_keys[@]} ]]; then
+                                log_error "Invalid selection"
+                                continue
+                            fi
+                            
+                            local key_to_delete="${env_keys[$((delete_choice-1))]}"
+                            echo -en "${RED}Are you sure you want to delete '$key_to_delete'?${NC} (y/N): "
+                            local delete_confirm
+                            if ! read -r delete_confirm || [[ "$delete_confirm" != "y" && "$delete_confirm" != "Y" ]]; then
+                                continue
+                            fi
+                            
+                            current_env_vars=$(echo "$current_env_vars" | jq --arg key "$key_to_delete" 'del(.[$key])')
+                            log_success "Deleted: $key_to_delete"
+                            ;;
+                        "3")
+                            log_info "Exit environment variable editing."
+                            break
+                            ;;
+                        *)
+                            log_error "Invalid option"
+                            ;;
+                    esac
+                    echo
+                done
+                
+                profile=$(echo "$profile" | jq --argjson env_vars "$current_env_vars" '.env_vars = $env_vars')
+                ;;
+            "4")
+                break
+                ;;
+            "5"|*)
                 log_info "Edit cancelled."
                 return 0
-            fi
-            
-            # Collect new environment variables
-            local new_env_vars='{}'
-            
-            # Collect API Key
-            echo -en "${BLUE}API Key${NC} (e.g., OPENAI_API_KEY=sk-123...): "
-            local api_key_input
-            if ! read -r api_key_input; then
-                log_error "Failed to read API key"
-                return 1
-            fi
-            
-            api_key_input=$(sanitize_input "$api_key_input")
-            if [[ ! "$api_key_input" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+$ ]]; then
-                log_error "Invalid format! Use KEY=VALUE"
-                return 1
-            fi
-            
-            local api_key_name="${api_key_input%%=*}"
-            local api_key_value="${api_key_input#*=}"
-            
-            if ! validate_env_key "$api_key_name" || ! validate_env_value "$api_key_value"; then
-                return 1
-            fi
-            
-            new_env_vars=$(echo "$new_env_vars" | jq --arg key "$api_key_name" --arg value "$api_key_value" '.[$key] = $value')
-            
-            # Collect Base URL (optional)
-            echo -en "${BLUE}Base URL${NC} (optional): "
-            local base_url_input
-            if ! read -r base_url_input; then
-                log_error "Failed to read base URL"
-                return 1
-            fi
-            
-            if [[ -n "$base_url_input" ]]; then
-                base_url_input=$(sanitize_input "$base_url_input")
-                if [[ ! "$base_url_input" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+$ ]]; then
-                    log_error "Invalid format! Use KEY=VALUE"
-                    return 1
-                fi
-                
-                local base_url_name="${base_url_input%%=*}"
-                local base_url_value="${base_url_input#*=}"
-                
-                if ! validate_env_key "$base_url_name" || ! validate_env_value "$base_url_value"; then
-                    return 1
-                fi
-                
-                new_env_vars=$(echo "$new_env_vars" | jq --arg key "$base_url_name" --arg value "$base_url_value" '.[$key] = $value')
-            fi
-            
-            # Collect additional environment variables
-            echo
-            log_info "Add additional environment variables (optional):"
-            while true; do
-                echo -en "${BLUE}Additional ENV${NC} (KEY=VALUE, or Enter to finish): "
-                local additional_env
-                if ! read -r additional_env; then
-                    log_error "Failed to read additional environment variable"
-                    return 1
-                fi
-                
-                if [[ -z "$additional_env" ]]; then
-                    break
-                fi
-                
-                additional_env=$(sanitize_input "$additional_env")
-                if [[ ! "$additional_env" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+$ ]]; then
-                    log_error "Invalid format! Use KEY=VALUE"
-                    continue
-                fi
-                
-                local env_name="${additional_env%%=*}"
-                local env_value="${additional_env#*=}"
-                
-                if ! validate_env_key "$env_name" || ! validate_env_value "$env_value"; then
-                    continue
-                fi
-                
-                new_env_vars=$(echo "$new_env_vars" | jq --arg key "$env_name" --arg value "$env_value" '.[$key] = $value')
-                log_success "Added: $env_name"
-            done
-            
-            profile=$(echo "$profile" | jq --argjson env_vars "$new_env_vars" '.env_vars = $env_vars')
-            ;;
-        "3")
-            # Edit both description and environment variables
-            echo -en "${BLUE}New Description${NC}: "
-            local new_description
-            if ! read -r new_description; then
-                log_error "Failed to read description"
-                return 1
-            fi
-            new_description=$(sanitize_input "$new_description")
-            if [[ -z "$new_description" ]]; then
-                new_description="No description provided"
-            fi
-            
-            # Same environment variable collection as option 2
-            log_info "Current environment variables will be replaced."
-            local new_env_vars='{}'
-            
-            # [Environment variable collection code - same as option 2]
-            # ... (truncated for brevity, but would include the same logic)
-            
-            profile=$(echo "$profile" | jq --arg desc "$new_description" --argjson env_vars "$new_env_vars" '.description = $desc | .env_vars = $env_vars')
-            ;;
-        "4"|*)
-            log_info "Edit cancelled."
-            return 0
-            ;;
-    esac
-    
+                ;;
+        esac
+    done
+
     # Update the profile in config
     config=$(echo "$config" | jq --arg name "$name" --argjson profile "$profile" '.profiles[$name] = $profile')
     
