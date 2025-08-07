@@ -5,15 +5,14 @@
 
 # Initialize the tool with enhanced security
 cmd_init() {
-    log_info "Initializing LAM (LLM API Manager)..."
-    
     if ! init_config_dir; then
         return 1
     fi
     
     if [[ -f "$CONFIG_FILE" ]]; then
         log_warning "LAM is already initialized!"
-        echo -n "Do you want to reset and create a new configuration? (y/N): "
+        log_warning "Reinitialization will ${RED}delete all existing profiles!${NC}"
+        echo -en "${RED}Sure to proceed?${NC} (y/N): "
         local confirm
         if ! read -r confirm; then
             log_error "Failed to read confirmation"
@@ -23,30 +22,26 @@ cmd_init() {
         if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
             log_info "Initialization cancelled."
             return 0
-        fi
-        
-        log_warning "This will delete all existing profiles!"
-        echo -n "Are you absolutely sure? (type 'yes' to confirm): "
-        if ! read -r confirm; then
-            log_error "Failed to read confirmation"
-            return 1
-        fi
-        
-        if [[ "$confirm" != "yes" ]]; then
-            log_info "Initialization cancelled."
-            return 0
-        fi
+        fi        
+
+        echo '-----------------------------------------'
+        echo
     fi
     
     # Get master password
     local password confirm_password
     
+    log_info "Initializing LAM (LLM API Manager)"
     echo
-    log_info "Please create a master password to encrypt your API keys."
-    log_gray "This password will be required to access your stored credentials."
+    echo "LAM uses a master password to encrypt all your API keys with AES-256-CBC encryption."
+    echo "This ensures your sensitive API credentials are stored securely on your system."
+    echo
+    log_gray "⚠️   The master password can only be set ${PURPLE}ONCE${GRAY} during initialization"
+    log_gray "⚠️   If you forget it, you'll need to ${PURPLE}re-init${GRAY} LAM and it will ${PURPLE}delete all data${NC}"
+    log_gray "⚠️   Set a strong password (≥ 8 characters) and store it carefully, there's ${PURPLE}no${GRAY} password recovery option"
     echo
     
-    if ! password=$(get_master_password "Create master password: "); then
+    if ! password=$(get_master_password "Set master password: "); then
         return 1
     fi
     
@@ -60,16 +55,16 @@ cmd_init() {
     fi
     
     # Create initial empty configuration
-    local initial_config='{"profiles":{},"metadata":{"created":"'$(date -Iseconds)'","version":"'$(get_version_info | cut -d'|' -f1)'"}}'
+    local initial_config='{"version":"'$(get_version_info | cut -d'|' -f1)'","profiles":{}}'
     
     if ! save_session_config "$initial_config" "$password"; then
         log_error "Failed to save initial configuration"
         return 1
     fi
     
-    log_success "LAM initialized successfully!"
     echo
-    log_info "You can now add API profiles using: lam add <profile_name>"
+    log_success "LAM initialized successfully!"
+    log_info "💡 You can now add API profiles using: ${PURPLE}lam add <profile_name>${NC}"
 }
 
 # Add new API profile with enhanced validation
