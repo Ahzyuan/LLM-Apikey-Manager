@@ -343,36 +343,29 @@ cmd_show() {
     
     if [[ "$profile" == "null" ]]; then
         log_error "Profile '$name' not found!"
-        echo
         log_info "Available profiles:"
         echo "$config" | jq -r '.profiles | keys[]' | sed 's/^/• /'
-        return 1
+        exit 1
     fi
     
-    echo "Profile Details: $name"
+    echo -e "${BLUE}Profile Details${NC}"
     echo "===================="
-    echo
+    echo -e "${PURPLE}• Profile Name${NC}: $name"
     
-    # Show description
     local description
     description=$(echo "$profile" | jq -r '.description // "No description"')
-    echo "Description: $description"
-    echo
+    echo -e "${PURPLE}• Description${NC}: $description"
     
-    # Show creation date
     local created
     created=$(echo "$profile" | jq -r '.created // "Unknown"')
-    echo "Created: $created"
+    echo -e "${PURPLE}• Created${NC}: $created"
     
-    # Show last used
     local last_used
     last_used=$(echo "$profile" | jq -r '.last_used // "Never"')
-    echo "Last Used: $last_used"
-    echo
+    echo -e "${PURPLE}• Last Used${NC}: $last_used"
     
     # Show environment variables with masked values
-    echo "Environment Variables:"
-    echo "---------------------"
+    echo -e "${PURPLE}• Environment Variables${NC}:"
     
     local env_vars
     env_vars=$(echo "$profile" | jq -r '.env_vars')
@@ -389,12 +382,13 @@ cmd_show() {
             masked_value="***"
         fi
         
-        echo "• $key = $masked_value"
+        echo -e "  └─ ${GREEN}$key${NC} = $masked_value"
     done <<< "$(echo "$env_vars" | jq -r 'keys[]')"
     
-    echo
-    log_info "To use this profile: lam use $name"
-    log_info "To edit this profile: lam edit $name"
+    echo 
+    echo '------------------------------------'
+    log_gray "To use this profile: lam use $name"
+    log_gray "To edit this profile: lam edit $name"
 }
 
 # Export profile to environment variables
