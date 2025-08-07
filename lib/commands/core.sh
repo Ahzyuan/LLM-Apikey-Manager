@@ -299,28 +299,28 @@ cmd_list() {
         return 0
     fi
     
-    echo "Available LLM API Profiles:"
-    echo "=========================="
-    
+    echo
     while IFS= read -r profile_name; do
         local profile
         profile=$(echo "$config" | jq -r ".profiles[\"$profile_name\"]")
-        local env_vars
-        env_vars=$(echo "$profile" | jq -r '.env_vars')
-        local description
-        description=$(echo "$profile" | jq -r '.description // "No description"')
-        local last_used
-        last_used=$(echo "$profile" | jq -r '.last_used // "Never"')
-        local env_keys
-        env_keys=$(echo "$env_vars" | jq -r 'keys | join(", ")')
         
-        echo
-        echo "Name: $profile_name"
-        echo "Environment Variables: $env_keys"
-        echo "Description: $description"
-        echo "Last Used: $last_used"
-        echo "---"
+        if [[ -n "$profile" && "$profile" != "null" ]]; then
+            local model_name description env_vars env_keys
+            model_name=$(echo "$profile" | jq -r '.model_name // "Not specified"')
+            description=$(echo "$profile" | jq -r '.description // "No description"')
+            env_vars=$(echo "$profile" | jq -r '.env_vars')
+            env_keys=$(echo "$env_vars" | jq -r 'keys | join(", ")')
+            
+            echo -e "${PURPLE}• Profile: $profile_name${NC}"
+            log_gray "  ├─ Model Name: $model_name"
+            log_gray "  ├─ Description: $description"
+            log_gray "  └─ Environment Variables: $env_keys"
+            echo
+        fi
     done <<< "$profiles"
+
+    log_info "💡 Get details for a profile: ${PURPLE}lam show <profile_name>${NC}"
+    echo
 }
 
 # Show specific profile with secure masking
