@@ -404,10 +404,9 @@ cmd_use() {
     if [[ -z "$name" ]]; then
         log_error "Profile name is required!"
         echo "Usage: lam use <profile_name>"
-        echo "   or: eval \"\$(lam use <profile_name>)\""
         return 1
     fi
-    
+        
     local config
     if ! config=$(get_session_config); then
         return 1
@@ -415,50 +414,48 @@ cmd_use() {
     
     local profile
     profile=$(echo "$config" | jq -r ".profiles[\"$name\"]" 2>/dev/null)
-    
     if [[ "$profile" == "null" ]]; then
         log_error "Profile '$name' not found!" >&2
-        echo >&2
         log_info "Available profiles:" >&2
         echo "$config" | jq -r '.profiles | keys[]' | sed 's/^/• /' >&2
+        exit 1
+    fi
+
+    # Check if we're being called within eval (stdout will be captured)
+    if [[ -t 1 ]]; then
+        log_info "💡 To use profile ${GREEN}'$name'${NC}, run: ${PURPLE}source <(lam use $name)${NC}"
+        return 0
+    fi
+    
+    local env_vars
+    env_vars=$(echo "$profile" | jq -r '.env_vars')
+    local model_name
+    model_name=$(echo "$profile" | jq -r '.model_name')
+    
+    # Update last used timestamp
+    config=$(echo "$config" | jq ".profiles[\"$name\"].last_used = \"$(date -Iseconds)\"") || {
+        log_error "Failed to update last used timestamp"
+        return 1
+    }
+    
+    # Get password for saving
+    local password
+    if ! password=$(get_verified_master_password); then
         return 1
     fi
     
-    # Update last used timestamp
-    local updated_timestamp
-    updated_timestamp=$(date -Iseconds)
-    
-    # Update the profile with new timestamp
-    local updated_profile
-    updated_profile=$(echo "$profile" | jq --arg timestamp "$updated_timestamp" '.last_used = $timestamp')
-    config=$(echo "$config" | jq --arg name "$name" --argjson profile "$updated_profile" '.profiles[$name] = $profile')
-    
-    # Save updated config
-    local password
-    if password=$(get_verified_master_password 2>/dev/null); then
-        if ! save_session_config "$config" "$password" 2>/dev/null; then
-            log_error "Failed to update last used timestamp" >&2
-        fi
+    if ! save_session_config "$config" "$password"; then
+        log_error "Failed to save configuration"
+        return 1
     fi
     
-    # Generate export statements
-    local env_vars
-    env_vars=$(echo "$profile" | jq -r '.env_vars')
-    
-    # Output export statements
-    while IFS= read -r key; do
-        local value
-        value=$(echo "$env_vars" | jq -r ".[\"$key\"]")
-        echo "export $key=\"$value\""
-    done <<< "$(echo "$env_vars" | jq -r 'keys[]')"
-    
-    # Set current profile indicator
-    echo "export LLM_CURRENT_PROFILE=\"$name\""
-    
-    # Output success message to stderr so it doesn't interfere with eval
-    log_success "Profile '$name' activated!" >&2
-    log_info "Environment variables exported:" >&2
-    echo "$env_vars" | jq -r 'keys[]' | sed 's/^/• /' >&2
+    echo "$env_vars" | jq -r 'to_entries[] | "export \(.key)='"'"'\(.value)'"'"'"'
+    echo "export LLM_CURRENT_PROFILE='$name'"
+
+    local exported_vars
+    exported_vars=$(echo "$env_vars" | jq -r 'keys | join(", ")')
+    log_success "Profile ${GREEN}'$name'${NC} activated!"
+    log_info "Variables exported: $exported_vars, LLM_CURRENT_PROFILE"
 }
 
 # Edit existing configuration with enhanced validation
