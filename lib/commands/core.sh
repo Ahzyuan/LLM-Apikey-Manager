@@ -352,10 +352,15 @@ cmd_show() {
     echo "===================="
     echo -e "${PURPLE}• Profile Name${NC}: $name"
     
+    local model_name
+    model_name=$(echo "$profile" | jq -r '.model_name // "Not specified"')
+    echo -e "${PURPLE}• Model Name${NC}: $model_name"
+    
     local description
     description=$(echo "$profile" | jq -r '.description // "No description"')
     echo -e "${PURPLE}• Description${NC}: $description"
     
+    echo
     local created
     created=$(echo "$profile" | jq -r '.created // "Unknown"')
     echo -e "${PURPLE}• Created${NC}: $created"
@@ -364,6 +369,7 @@ cmd_show() {
     last_used=$(echo "$profile" | jq -r '.last_used // "Never"')
     echo -e "${PURPLE}• Last Used${NC}: $last_used"
     
+    echo 
     # Show environment variables with masked values
     echo -e "${PURPLE}• Environment Variables${NC}:"
     
@@ -482,9 +488,15 @@ cmd_edit() {
     echo -e "${BLUE}Editing profile${NC}"
     echo "====================="
     echo -e "${PURPLE}• Profile Name${NC}: $name"
+
+    local model_name
+    model_name=$(echo "$profile" | jq -r '.model_name // "Not specified"')
+    echo -e "${PURPLE}• Model Name${NC}: $model_name"
+
     local description
     description=$(echo "$profile" | jq -r '.description // "No description"')
     echo -e "${PURPLE}• Description${NC}: $description"
+
     local env_vars
     env_vars=$(echo "$profile" | jq -r '.env_vars | keys | join(", ")')
     echo -e "${PURPLE}• Environment Variables${NC}: $env_vars"
@@ -494,12 +506,13 @@ cmd_edit() {
         echo '-----------------------------'
         echo "What would you like to edit?"
         log_gray "1) Profile Name"
-        log_gray "2) Description"
-        log_gray "3) Environment Variables"
-        log_gray "4) Save Changes"
-        log_gray "5) Discard Changes"
+        log_gray "2) Model Name"
+        log_gray "3) Description"
+        log_gray "4) Environment Variables"
+        log_gray "5) Save Changes"
+        log_gray "6) Discard Changes"
         echo
-        echo -n "Choose option (1-5): "
+        echo -n "Choose option (1-6): "
         
         local choice
         if ! read -r choice; then
@@ -548,6 +561,29 @@ cmd_edit() {
                 log_success "Profile name changed to: $new_name"
                 ;;
             "2")
+                # Edit model name
+                echo -en "${BLUE}New Model Name${NC}: "
+                local new_model_name
+                if ! read -r new_model_name; then
+                    log_error "Failed to read model name"
+                    return 1
+                fi
+                
+                new_model_name=$(sanitize_input "$new_model_name")
+                if [[ -z "$new_model_name" ]]; then
+                    log_error "Model name cannot be empty!"
+                    continue
+                fi
+                
+                if [[ ${#new_model_name} -gt 100 ]]; then
+                    log_error "Model name too long (max 100 characters)"
+                    continue
+                fi
+                
+                profile=$(echo "$profile" | jq --arg model "$new_model_name" '.model_name = $model')
+                log_success "Model name updated successfully: $new_model_name"
+                ;;
+            "3")
                 # Edit description only
                 echo -en "${BLUE}New Description${NC}: "
                 local new_description
@@ -562,7 +598,7 @@ cmd_edit() {
                 profile=$(echo "$profile" | jq --arg desc "$new_description" '.description = $desc')
                 log_success "Description updated successfully: $new_description"
                 ;;
-            "3")
+            "4")
                 # Edit environment variables individually
                 local current_env_vars
                 current_env_vars=$(echo "$profile" | jq -r '.env_vars')
@@ -686,10 +722,10 @@ cmd_edit() {
                 
                 profile=$(echo "$profile" | jq --argjson env_vars "$current_env_vars" '.env_vars = $env_vars')
                 ;;
-            "4")
+            "5")
                 break
                 ;;
-            "5"|*)
+            "6"|*)
                 log_info "Edit cancelled."
                 return 0
                 ;;
