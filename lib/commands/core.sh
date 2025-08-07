@@ -99,7 +99,7 @@ cmd_add() {
     
     if [[ "$existing_profile" != "null" ]]; then
         log_warning "Profile '$name' already exists!"
-        echo -en "${YELLOW}Do you want to overwrite it? (y/N): ${NC}"
+        echo -en "${RED}Do you want to overwrite it? (y/N): ${NC}"
         local confirm
         if ! read -r confirm; then
             log_error "Failed to read confirmation"
@@ -118,7 +118,7 @@ cmd_add() {
     # Collect Model Name (required)
     local model_name
     while true; do
-        echo -en "${BLUE}Model Name${NC} (required, e.g., gpt-4, claude-3-sonnet): "
+        echo -en "${PURPLE}Model Name${NC} (required, e.g., gpt-4, claude-3-sonnet): "
         if ! read -r model_name; then
             log_error "Failed to read model name"
             return 1
@@ -144,63 +144,71 @@ cmd_add() {
     local env_vars='{}'
     
     # Collect API Key
-    echo -en "${BLUE}API Key${NC} (e.g., OPENAI_API_KEY=sk-123): "
-    local api_key_input
-    if ! read -r api_key_input; then
-        log_error "Failed to read API key"
-        return 1
-    fi
-    
-    # Validate and parse API key input
-    api_key_input=$(sanitize_input "$api_key_input")
-    if [[ ! "$api_key_input" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+$ ]]; then
-        log_error "Invalid format! Use KEY=VALUE (e.g., OPENAI_API_KEY=sk-123...)"
-        return 1
-    fi
-    
-    local api_key_name="${api_key_input%%=*}"
-    local api_key_value="${api_key_input#*=}"
-    
-    if ! validate_env_key "$api_key_name" || ! validate_env_value "$api_key_value"; then
-        return 1
-    fi
+    local api_key_input api_key_name api_key_value
+    while true; do
+        echo -en "${PURPLE}API Key${NC} (e.g., OPENAI_API_KEY=sk-123): "
+        if ! read -r api_key_input; then
+            log_error "Failed to read API key"
+            return 1
+        fi
+        
+        # Validate and parse API key input
+        api_key_input=$(sanitize_input "$api_key_input")
+        if [[ ! "$api_key_input" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+$ ]]; then
+            log_error "Invalid format! Use KEY=VALUE (e.g., OPENAI_API_KEY=sk-123...)"
+            continue
+        fi
+        
+        api_key_name="${api_key_input%%=*}"
+        api_key_value="${api_key_input#*=}"
+        
+        if ! validate_env_key "$api_key_name" || ! validate_env_value "$api_key_value"; then
+            continue
+        fi
+        
+        break
+    done
     
     env_vars=$(echo "$env_vars" | jq --arg key "$api_key_name" --arg value "$api_key_value" '.[$key] = $value')
     log_success "Added: $api_key_name=***"
     echo
     
     # Collect Base URL (optional)
-    echo -en "${BLUE}Base URL${NC} (optional, e.g., OPENAI_BASE_URL=https://api.openai.com/v1): "
     local base_url_input
-    if ! read -r base_url_input; then
-        log_error "Failed to read base URL"
-        return 1
-    fi
-    
-    if [[ -n "$base_url_input" ]]; then
+    while true; do
+        echo -en "${PURPLE}Base URL${NC} (optional, e.g., OPENAI_BASE_URL=https://api.openai.com/v1): "
+        if ! read -r base_url_input; then
+            log_error "Failed to read base URL"
+            return 1
+        fi
+        
+        if [[ -z "$base_url_input" ]]; then
+            log_info "Base URL: (skipped)"
+            break
+        fi
+        
         base_url_input=$(sanitize_input "$base_url_input")
         if [[ ! "$base_url_input" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+$ ]]; then
             log_error "Invalid format! Use KEY=VALUE (e.g., OPENAI_BASE_URL=https://api.openai.com/v1)"
-            return 1
+            continue
         fi
         
         local base_url_name="${base_url_input%%=*}"
         local base_url_value="${base_url_input#*=}"
         
         if ! validate_env_key "$base_url_name" || ! validate_env_value "$base_url_value"; then
-            return 1
+            continue
         fi
         
         env_vars=$(echo "$env_vars" | jq --arg key "$base_url_name" --arg value "$base_url_value" '.[$key] = $value')
         log_success "Added: $base_url_name=$base_url_value"
-    else
-        log_info "Base URL: (skipped)"
-    fi
+        break
+    done
     echo
     
     # Collect additional environment variables
     while true; do
-        echo -en "${BLUE}Additional ENV${NC} (KEY=VALUE format, or press Enter to finish): "
+        echo -en "${PURPLE}Additional ENV${NC} (KEY=VALUE format, or press Enter to finish): "
         local additional_env
         if ! read -r additional_env; then
             log_error "Failed to read additional environment variable"
@@ -232,7 +240,7 @@ cmd_add() {
     echo
     
     # Collect description (optional)
-    echo -en "${BLUE}Description${NC} (optional): "
+    echo -en "${PURPLE}Description${NC} (optional): "
     local description
     if ! read -r description; then
         log_error "Failed to read description"
@@ -276,9 +284,6 @@ cmd_add() {
     fi
     
     log_success "Profile '$name' added successfully!"
-    echo
-    log_info "Environment variables configured:"
-    echo "$env_vars" | jq -r 'to_entries[] | "• \(.key)"'
     echo
     log_info "💡 To use this profile, run: lam use $name"
 }
