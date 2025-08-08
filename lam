@@ -89,9 +89,6 @@ main() {
         "delete"|"del")
             cmd_delete "${2:-}"
             ;;
-        "test")
-            cmd_test
-            ;;
         "backup"|"bak")
             cmd_backup "${2:-}" "${3:-}"
             ;;

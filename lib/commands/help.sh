@@ -36,15 +36,14 @@ COMMANDS:
     • edit <name>             Edit existing profile
     • delete, del <name>      Delete specific profile
     • status                  Show LAM status and statistics
-    • test                    Test API connection for current profile
     • backup <action>         Comprehensive backup management
       ├─ create [name]         • Create backup (optionally with custom name)
-      ├─ list                  • List all available backups
+      ├─ list, ls              • List all available backups
       ├─ info <file>           • Show detailed backup information
       ├─ load <file>           • Load configuration from backup
-      ├─ delete <file>         • Delete a backup file
-      └─ help                  • Show backup management help
-    • upgrade, update         Upgrade LAM to latest version
+      ├─ delete, del <file>    • Delete a backup file
+      └─ help, -h              • Show backup management help
+    • update                  Upgrade LAM to latest version
     • uninstall               Completely remove LAM from system
     • help, -h                Show this help message
     • version, -v             Show version information

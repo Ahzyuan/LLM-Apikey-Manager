@@ -280,7 +280,7 @@ cmd_add() {
     
     log_success "Profile '$name' added successfully!"
     echo
-    log_info "💡 To use this profile, run: lam use $name"
+    log_info "💡 To use this profile, run: source <(lam use $name)"
 }
 
 # List all profiles with enhanced formatting
@@ -393,7 +393,7 @@ cmd_show() {
     
     echo 
     echo '------------------------------------'
-    log_gray "To use this profile: lam use $name"
+    log_gray "To use this profile: source <(lam use $name)"
     log_gray "To edit this profile: lam edit $name"
 }
 
