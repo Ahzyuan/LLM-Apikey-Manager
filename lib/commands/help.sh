@@ -3,7 +3,39 @@
 # LAM Tool Help & Version
 # Functions: version, help
 
-# Show version information
+# Get version info from VERSION file
+# returns "version|description"
+get_version_info() {
+    local version_file
+    version_file="$SCRIPT_DIR/VERSION"
+    
+    if [[ -f "$version_file" ]]; then
+        local version_content
+        version_content=$(cat "$version_file" 2>/dev/null) || {
+            echo "unknown|"
+            return 0
+        }
+        
+        local version_number
+        if ! version_number=$(echo "$version_content" | head -n1 | tr -d '[:space:]' 2>/dev/null); then
+            version_number="unknown"
+        fi
+
+        local version_description
+        if ! version_description=$(\
+            echo "$version_content" | tail -n +2 2>/dev/null | \
+            grep -v '^[[:space:]]*$' 2>/dev/null | head -n1 2>/dev/null\
+        ); then
+            version_description=""
+        fi        
+
+        echo "${version_number}|${version_description}"
+    else
+        # Don't log warnings for help/version commands - just return default
+        echo "unknown|"
+    fi
+}
+
 cmd_version() {
     local version_info
     local version_number
@@ -19,7 +51,6 @@ cmd_version() {
     fi
 }
 
-# Show help
 cmd_help() {
     echo "LAM (LLM API Manager) v$(get_version_info | cut -d'|' -f1) - Secure management of LLM API credentials"
     echo
