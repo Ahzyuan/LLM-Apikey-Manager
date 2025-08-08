@@ -81,6 +81,7 @@ check_initialization() {
     fi
 }
 
+# -------------------------------- Input Validation --------------------------------
 # Secure input validation functions
 validate_input_length() {
     local input="$1"
@@ -107,6 +108,7 @@ validate_env_key() {
     # Must start with letter or underscore, contain only alphanumeric and underscore
     if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
         log_error "Invalid environment variable key format: $key"
+        log_info "Environment variable keys must start with a letter or underscore, and contain only alphanumeric and underscore characters."
         return 1
     fi
     
@@ -124,8 +126,13 @@ validate_env_value() {
     local value="$1"
     
     # Check for dangerous characters
-    if [[ "$value" =~ [\$\`\!\&\;\|\<\>] ]]; then
-        log_error "Environment variable value contains potentially dangerous characters"
+    local danger_chars_list=($(grep -o '[\$\`\!\&\;\|\<\>]' <<<"$value" | sort -u))
+    
+    local char
+    if [[ ${#danger_chars_list[@]} -gt 0 ]]; then
+        local IFS=","
+        log_error "Environment variable value contains following potentially dangerous characters:"
+        log_error "Dangerous characters (separated by commas): ${danger_chars_list[*]}"
         return 1
     fi
     
@@ -138,6 +145,7 @@ validate_env_value() {
     return 0
 }
 
+# -------------------------------------- Misc -------------------------------------
 # Create secure temporary file
 create_temp_file() {
     local temp_file
