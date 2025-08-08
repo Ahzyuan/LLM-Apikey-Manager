@@ -3,7 +3,6 @@
 # LAM Utils Module
 # Logging, validation, and utility functions
 
-# Colors for output
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly YELLOW='\033[1;33m'
@@ -12,24 +11,10 @@ readonly PURPLE='\033[0;35m'
 readonly GRAY='\033[0;90m'
 readonly NC='\033[0m' # No Color
 
-# Global variables for cleanup
 declare -a TEMP_FILES=()
 declare -a TEMP_DIRS=()
 
-# Cleanup function
-cleanup_temp_resources() {
-    local file dir
-    for file in "${TEMP_FILES[@]}"; do
-        [[ -f "$file" ]] && rm -f "$file"
-    done
-    for dir in "${TEMP_DIRS[@]}"; do
-        [[ -d "$dir" ]] && rm -rf "$dir"
-    done
-    TEMP_FILES=()
-    TEMP_DIRS=()
-}
-
-# Utility functions
+# --------------------------------- Color Log ---------------------------------
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1" >&2
 }
@@ -54,15 +39,46 @@ log_purple() {
     echo -e "${PURPLE}$1${NC}" >&2
 }
 
-# Enhanced error handling
-handle_error() {
-    local exit_code=$1
-    local message="$2"
-    local line_number=${3:-"unknown"}
+# --------------------------------- Running Health ---------------------------------
+# GC, garbage collection & cleanup
+cleanup_temp_resources() {
+    local file dir
+    for file in "${TEMP_FILES[@]}"; do
+        [[ -f "$file" ]] && rm -f "$file"
+    done
+    for dir in "${TEMP_DIRS[@]}"; do
+        [[ -d "$dir" ]] && rm -rf "$dir"
+    done
+    TEMP_FILES=()
+    TEMP_DIRS=()
+}
+
+check_dependencies() {
+    local dependencies=("jq" "openssl" "curl" "tar")
+    local missing_deps=()
+    local dep
     
-    log_error "$message (line: $line_number)"
-    cleanup_temp_resources
-    exit "$exit_code"
+    for dep in "${dependencies[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            missing_deps+=("$dep")
+        fi
+    done
+    
+    if [[ ${#missing_deps[@]} -gt 0 ]]; then
+        log_error "Missing required dependencies: ${missing_deps[*]}"
+        log_info "Please install them using:"
+        log_info "sudo apt-get update && sudo apt-get install -y ${missing_deps[*]}"
+        exit 1
+    fi
+}
+
+# Check if LAM is initialized
+check_initialization() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        log_error "LAM is not initialized!"
+        log_info "Please run 'lam init' first to set up your master password."
+        exit 1
+    fi
 }
 
 # Secure input validation functions
@@ -120,45 +136,6 @@ validate_env_value() {
     fi
     
     return 0
-}
-
-# Check dependencies
-check_dependencies() {
-    local missing_deps=()
-    
-    if ! command -v jq >/dev/null 2>&1; then
-        missing_deps+=("jq")
-    fi
-    
-    if ! command -v openssl >/dev/null 2>&1; then
-        missing_deps+=("openssl")
-    fi
-    
-    if ! command -v curl >/dev/null 2>&1; then
-        missing_deps+=("curl")
-    fi
-    
-    if ! command -v tar >/dev/null 2>&1; then
-        missing_deps+=("tar")
-    fi
-    
-    if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        log_error "Missing required dependencies: ${missing_deps[*]}"
-        echo
-        log_info "Please install them using:"
-        echo "sudo apt-get update && sudo apt-get install ${missing_deps[*]}"
-        exit 1
-    fi
-}
-
-# Check if LAM is initialized
-check_initialization() {
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        log_error "LAM is not initialized!"
-        echo
-        log_info "Please run 'lam init' first to set up your master password."
-        exit 1
-    fi
 }
 
 # Create secure temporary file

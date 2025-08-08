@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 
-# LAM (LLM API Manager) - Modular Version
-# A secure tool to manage LLM API keys and base URLs
+# LAM (LLM Api-key Manager)
+# Desc: A secure tool to manage LLM API keys, base URLs and other sensitive credentials
 # Author: Ahzyuan
+# Repo: https://github.com/Ahzyuan/LLM-Apikey-Manager
 
 set -euo pipefail
 
-# Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Configuration - use actual user's home directory, not root's when installed system-wide
 if [[ $EUID -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]]; then
     # Running as root via sudo - use the original user's home
     USER_HOME=$(eval echo ~$SUDO_USER)
@@ -22,35 +21,35 @@ else
     CONFIG_DIR="$HOME/.config/lam"
 fi
 
-CONFIG_FILE="$CONFIG_DIR/config.enc"
-LOCK_FILE="$CONFIG_DIR/.lock"
-SESSION_FILE="$CONFIG_DIR/.session"
+CONFIG_FILE="$CONFIG_DIR/config.enc" # store all profiles details in encrypt 
+SESSION_FILE="$CONFIG_DIR/.session"  # store session status, age, etc
 
 # Security constants
 readonly MAX_PASSWORD_LENGTH=256
 readonly MIN_PASSWORD_LENGTH=8
 readonly MAX_INPUT_LENGTH=4096
-readonly SESSION_TIMEOUT=${LAM_SESSION_TIMEOUT:-1800}  # 30 minutes default
+readonly SESSION_TIMEOUT=1800  # 30 minutes default
 
-# Load modules
-source "$SCRIPT_DIR/lib/utils.sh"
-source "$SCRIPT_DIR/lib/security.sh"
-source "$SCRIPT_DIR/lib/config.sh"
+# Load all modules
+LIB_DIR="$SCRIPT_DIR/lib"
+if [[ ! -d "$LIB_DIR" ]]; then
+    echo "Error: Library directory '$LIB_DIR' not found" >&2
+    exit 1
+else
+    while IFS= read -r -d '' module_file; do
+        if [[ -f "$module_file" && -r "$module_file" ]]; then
+            source "$module_file"
+        else
+            echo "Warning: Cannot read module file '$module_file'" >&2
+        fi
+    done < <(find "$LIB_DIR" -name "*.sh" -type f -print0 | sort -z)
+fi
 
-# Load command modules
-source "$SCRIPT_DIR/lib/commands/core.sh"
-source "$SCRIPT_DIR/lib/commands/backup.sh"
-source "$SCRIPT_DIR/lib/commands/help.sh"
-source "$SCRIPT_DIR/lib/commands/system.sh"
-
-# Set trap for cleanup on exit
-trap cleanup_temp_resources EXIT
+# Set up trap for gc & error trace back
+trap cleanup_temp_resources EXIT # trap for cleanup on exit
 
 # Main function with enhanced error handling
 main() {
-    # Set up error handling
-    set -eE
-    trap 'handle_error $? "Unexpected error occurred" $LINENO' ERR
     
     check_dependencies
     
@@ -109,8 +108,7 @@ main() {
             ;;
         *)
             log_error "Unknown command: $command"
-            echo
-            echo "Use 'lam help' for available commands."
+            log_info "Use 'lam help' for available commands."
             exit 1
             ;;
     esac
