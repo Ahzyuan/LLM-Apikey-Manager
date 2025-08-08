@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # LAM Core Commands Module
 # Profile management: init, add, list, show, use, edit, delete

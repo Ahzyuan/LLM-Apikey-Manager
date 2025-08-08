@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # LAM Configuration Module
 # Configuration management, loading, saving, and validation

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # LAM (LLM API Manager) - Modular Version
 # A secure tool to manage LLM API keys and base URLs

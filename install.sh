@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # LAM (LLM API Manager) Installation Script
 # This script installs the modular LAM system with all library dependencies
@@ -205,7 +205,7 @@ install_lam() {
     
     # Create a wrapper script that calls the main executable
     cat > "$wrapper_script" << EOF
-#!/bin/bash
+#!/usr/bin/env bash
 # LAM wrapper script - calls the main modular executable
 exec "$lam_install_dir/lam" "\$@"
 EOF

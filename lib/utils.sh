@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # LAM Utils Module
 # Logging, validation, and utility functions

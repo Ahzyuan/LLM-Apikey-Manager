@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # LAM Security Module
 # Password handling, encryption, and security functions

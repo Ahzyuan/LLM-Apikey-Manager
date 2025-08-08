@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # LAM System Related Commands
 # Functions: status, update, uninstall
@@ -87,7 +87,7 @@ cmd_update() {
     # Download the latest version from GitHub
     if curl -sL "https://raw.githubusercontent.com/Ahzyuan/LLM-Apikey-Manager/lam" -o "$temp_dir/lam"; then
         # Verify the downloaded file
-        if [[ -f "$temp_dir/lam" ]] && [[ -s "$temp_dir/lam" ]] && head -1 "$temp_dir/lam" | grep -q "#!/bin/bash"; then
+        if [[ -f "$temp_dir/lam" ]] && [[ -s "$temp_dir/lam" ]] && head -1 "$temp_dir/lam" | grep -q "#!/usr/bin/env bash"; then
             # Extract version from downloaded file
             local new_version
             new_version=$(grep "^# Version:" "$temp_dir/lam" | head -1 | sed 's/.*Version: //' | sed 's/ .*//')
@@ -359,7 +359,7 @@ cmd_uninstall() {
         # Create a self-deleting script to remove the current executable
         local cleanup_script="/tmp/lam_cleanup_$$"
         cat > "$cleanup_script" << 'EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 sleep 1  # Wait for parent script to exit
 if [[ -f "$1" ]]; then
     rm -f "$1"
