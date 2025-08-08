@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 
 # LAM (LLM API Manager) Installation Script
-# This script installs the modular LAM system with all library dependencies
+# This script installs the LAM system with all library dependencies
 
 set -euo pipefail
 
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -29,7 +28,6 @@ log_error() {
 }
 
 
-# Check dependencies
 check_dependencies() {
     local deps=("jq" "openssl" "curl" "tar")
     local missing_deps=()
@@ -44,7 +42,7 @@ check_dependencies() {
     
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
         log_error "Missing dependencies: ${missing_deps[*]}"
-        log_info "Please install them with: sudo apt-get install ${missing_deps[*]}"
+        log_info "Please install them with: sudo apt-get install -y ${missing_deps[*]}"
         exit 1
     fi
     
@@ -159,16 +157,19 @@ check_file_integrity() {
     log_success "All required files found for installation"
 }
 
-# Install the modular LAM system
 install_lam() {
     log_info "Installing LAM (LLM API Manager)..."
     
-    # Create LAM library directory structure (separate from bin)
-    local lam_install_dir="$LAM_LIB_DIR"
     
     # Remove old installation if it exists
+    local lam_install_dir="$LAM_LIB_DIR"
+    local wrapper_script="$INSTALL_DIR/lam" # wrapper script in bin dir
     if [[ -d "$lam_install_dir" ]]; then
+        log_warning "Removing existing LAM installation..."
         rm -rf "$lam_install_dir"
+    fi
+    if [[ -e "$wrapper_script" ]] || [[ -L "$wrapper_script" ]]; then
+        rm -rf "$wrapper_script"
     fi
     
     # Create directory structure
@@ -194,15 +195,7 @@ install_lam() {
         cp "lib/commands/$module" "$lam_install_dir/lib/commands/"
         chmod 644 "$lam_install_dir/lib/commands/$module"
     done
-    
-    # Create wrapper script in bin directory
-    local wrapper_script="$INSTALL_DIR/lam"
-    
-    # Remove any existing lam file/link/directory
-    if [[ -e "$wrapper_script" ]] || [[ -L "$wrapper_script" ]]; then
-        rm -rf "$wrapper_script"
-    fi
-    
+            
     # Create a wrapper script that calls the main executable
     cat > "$wrapper_script" << EOF
 #!/usr/bin/env bash
@@ -215,7 +208,6 @@ EOF
     log_success "LAM libraries installed to $lam_install_dir"
 }
 
-# Test LAM installation
 test_installation() {
     log_info "Testing LAM installation..."
     
@@ -233,6 +225,7 @@ test_installation() {
         else
             log_error "LAM executable not found anywhere"
             log_info "Please re-clone the LAM repository and try again"
+            log_info "LAM Repo: https://github.com/Ahzyuan/LLM-Apikey-Manager"
             return 1
         fi
     else
@@ -250,11 +243,10 @@ test_installation() {
     fi
         
     log_success "All installation tests passed!"
-    log_success "LAM is properly installed and accessible🚀!"
+    log_success "LAM is properly installed and accessible 🚀!"
     return 0
 }
 
-# Main installation function
 main() {
     local version=$(cat "VERSION" 2>/dev/null || echo "unknown")
     echo "LAM (LLM API Manager) Installation"
@@ -279,13 +271,17 @@ main() {
         echo
         log_info "To get started:"
         log_info "1. Run 'lam init' to initialize the tool"
-        log_info "2. Run 'lam add <name>' to add your first API configuration"
+        log_info "2. Run 'lam add <profile-name>' to add your first API profile"
         log_info "3. Run 'lam help' for more information"
+        echo 
+        log_info "For detailed examples and usage, refer to: https://github.com/Ahzyuan/LLM-Apikey-Manager 🚀."
+        log_info "Looking forward to your star ⭐, feedback 💬 and contributions 🤝!"
         echo
     else
         echo
         log_error "Installation completed but tests failed!"
         log_error "LAM may not work correctly. Please check the errors above."
+        echo
         exit 1
     fi
     
