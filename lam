@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 
 # LAM (LLM Api-key Manager)
-# Desc: A secure tool to manage LLM API keys, base URLs and other sensitive credentials
+# Desc: An out-of-box, lite, secure terminal tool to 
+#       manage LLM API keys, base URLs and other sensitive credentials
 # Author: Ahzyuan
 # Repo: https://github.com/Ahzyuan/LLM-Apikey-Manager
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 if [[ $EUID -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]]; then
     # Running as root via sudo - use the original user's home
@@ -21,7 +22,8 @@ else
     CONFIG_DIR="$HOME/.config/lam"
 fi
 
-CONFIG_FILE="$CONFIG_DIR/config.enc" # store all profiles details in encrypt 
+AUTH_FILE="$CONFIG_DIR/.auth"
+DB_FILE="$CONFIG_DIR/profiles.db"   # SQLite database file 
 SESSION_FILE="$CONFIG_DIR/.session"  # store session status, age, etc
 
 # Security constants

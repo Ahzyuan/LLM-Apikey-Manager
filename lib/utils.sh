@@ -54,7 +54,7 @@ cleanup_temp_resources() {
 }
 
 check_dependencies() {
-    local dependencies=("jq" "openssl" "curl" "tar")
+    local dependencies=("sqlite3" "openssl" "curl" "tar")
     local missing_deps=()
     local dep
     
@@ -74,7 +74,7 @@ check_dependencies() {
 
 # Check if LAM is initialized
 check_initialization() {
-    if [[ ! -f "$CONFIG_FILE" ]]; then
+    if [[ ! -f "$DB_FILE" ]]; then
         log_error "LAM is not initialized!"
         log_info "Please run 'lam init' first to set up your master password."
         exit 1

@@ -29,7 +29,7 @@ log_error() {
 
 
 check_dependencies() {
-    local deps=("jq" "openssl" "curl" "tar")
+    local deps=("sqlite3" "openssl" "curl" "tar")
     local missing_deps=()
 
     log_info "Checking dependencies..."
@@ -55,13 +55,13 @@ check_dependencies() {
         log_warning "Consider upgrading to OpenSSL 1.1.1 or later using: sudo apt-get install openssl"
     fi
     
-    # Check jq version (minimum 1.5 for good JSON support)
-    local jq_version
-    jq_version=$(jq --version 2>/dev/null | grep -o '[0-9.]*' | head -1)
-    local min_jq_version="1.5"
-    if [[ -n "$jq_version" && "$(printf '%s\n' "$min_jq_version" "$jq_version" | sort -V | head -n1)" != "$min_jq_version" ]]; then
-        log_warning "jq version $jq_version may have limited features"
-        log_warning "Consider upgrading to jq 1.5 or later using: sudo apt-get install jq"
+    # Check SQLite version (minimum 3.7.0 for good features)
+    local sqlite_version
+    sqlite_version=$(sqlite3 --version 2>/dev/null | cut -d' ' -f1)
+    local min_sqlite_version="3.7.0"
+    if [[ -n "$sqlite_version" && "$(printf '%s\n' "$min_sqlite_version" "$sqlite_version" | sort -V | head -n1)" != "$min_sqlite_version" ]]; then
+        log_warning "SQLite version $sqlite_version may have limited features"
+        log_warning "Consider upgrading to SQLite 3.7.0 or later using: sudo apt-get install sqlite3"
     fi
 
     log_success "All dependencies are installed"

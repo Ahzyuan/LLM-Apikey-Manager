@@ -5,47 +5,43 @@
 
 # Initialize the tool with enhanced security
 cmd_init() {
-    if ! init_config_dir; then
-        return 1
-    fi
+    # Check if already initialized
+    init_config_dir || return 1
     
-    if [[ -f "$CONFIG_FILE" ]]; then
+    if check_initialization 2>/dev/null; then
         log_warning "LAM is already initialized!"
         log_warning "Reinitialization will ${RED}delete all existing profiles!${NC}"
-        echo -en "${RED}Sure to proceed?${NC} (y/N): "
-        local confirm
-        if ! read -r confirm; then
-            log_error "Failed to read confirmation"
+        
+        if ! get_verified_master_password "${RED}Verify your master password to proceed?${NC}: " >/dev/null; then
             return 1
         fi
-        
-        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-            log_info "Initialization cancelled."
-            return 0
-        fi        
+
+        rm -rf "$CONFIG_DIR"/* || {
+            log_error "Failed to delete existing profiles."
+            log_info "You can manually delete them by: ${PURPLE}rm -rf $CONFIG_DIR/*${NC}"
+            return 1
+        }
 
         echo '-----------------------------------------'
         echo
     fi
     
-    # Get master password
-    local password confirm_password
-    
     log_info "Initializing LAM (LLM API Manager)"
     echo
-    echo "LAM uses a master password to encrypt all your API keys with AES-256-CBC encryption."
-    echo "This ensures your sensitive API credentials are stored securely on your system."
+    echo "In the following process, you'll need to set up a master password."
+    echo "This master password is used to encrypt, decrypt, and access all your sensitive credentials."
     echo
     log_gray "⚠️   The master password can only be set ${PURPLE}ONCE${GRAY} during initialization"
     log_gray "⚠️   If you forget it, you'll need to ${PURPLE}re-init${GRAY} LAM and it will ${PURPLE}delete all data${NC}"
     log_gray "⚠️   Set a strong password (≥ 8 characters) and store it carefully, there's ${PURPLE}no${GRAY} password recovery option"
     echo
     
-    if ! password=$(get_master_password "Set master password: "); then
+    local password confirm_password
+    if ! password=$(get_master_password "Set master password: " true); then
         return 1
     fi
     
-    if ! confirm_password=$(get_master_password "Confirm master password: "); then
+    if ! confirm_password=$(get_master_password "Confirm master password: " true); then
         return 1
     fi
     
@@ -54,11 +50,15 @@ cmd_init() {
         return 1
     fi
     
-    # Create initial empty configuration
-    local initial_config='{"version":"'$(get_version_info | cut -d'|' -f1)'","profiles":{}}'
+    # Initialize SQLite database
+    if ! init_database; then
+        log_error "Failed to initialize database"
+        return 1
+    fi
     
-    if ! save_session_config "$initial_config" "$password"; then
-        log_error "Failed to save initial configuration"
+    # Create password authentication file for SQLite setups
+    if ! create_auth_file "$password"; then
+        log_error "Failed to create password authentication credential"
         return 1
     fi
     
@@ -83,16 +83,8 @@ cmd_add() {
         return 1
     fi
     
-    local config
-    if ! config=$(get_session_config); then
-        return 1
-    fi
-    
     # Check if profile already exists
-    local existing_profile
-    existing_profile=$(echo "$config" | jq -r ".profiles[\"$name\"]" 2>/dev/null)
-    
-    if [[ "$existing_profile" != "null" ]]; then
+    if profile_exists "$name"; then
         log_warning "Profile '$name' already exists!"
         echo -en "${RED}Do you want to overwrite it? (y/N): ${NC}"
         local confirm
@@ -164,7 +156,12 @@ cmd_add() {
         break
     done
     
-    env_vars=$(echo "$env_vars" | jq --arg key "$api_key_name" --arg value "$api_key_value" '.[$key] = $value')
+    # Build env_vars JSON manually (since no jq)
+    if [[ "$env_vars" == "{}" ]]; then
+        env_vars="{\"$api_key_name\":\"$api_key_value\"}"
+    else
+        env_vars="${env_vars%?},\"$api_key_name\":\"$api_key_value\"}"
+    fi
     log_success "Added: $api_key_name=***"
     echo
     
@@ -195,7 +192,8 @@ cmd_add() {
             continue
         fi
         
-        env_vars=$(echo "$env_vars" | jq --arg key "$base_url_name" --arg value "$base_url_value" '.[$key] = $value')
+        # Add to env_vars JSON manually
+        env_vars="${env_vars%?},\"$base_url_name\":\"$base_url_value\"}"
         log_success "Added: $base_url_name=$base_url_value"
         break
     done
@@ -229,7 +227,8 @@ cmd_add() {
             continue
         fi
         
-        env_vars=$(echo "$env_vars" | jq --arg key "$env_name" --arg value "$env_value" '.[$key] = $value')
+        # Add to env_vars JSON manually
+        env_vars="${env_vars%?},\"$env_name\":\"$env_value\"}"
         log_success "Added: $env_name"
     done
     echo
@@ -249,32 +248,12 @@ cmd_add() {
     log_success "Description: $description"
     echo
     
-    # Create profile object
-    local profile_data
-    profile_data=$(jq -n \
-        --argjson env_vars "$env_vars" \
-        --arg model_name "$model_name" \
-        --arg description "$description" \
-        --arg created "$(date -Iseconds)" \
-        '{
-            env_vars: $env_vars,
-            model_name: $model_name,
-            description: $description,
-            created: $created,
-            last_used: null
-        }')
+    # Close the env_vars JSON object
+    env_vars="$env_vars}"
     
-    # Add profile to config
-    config=$(echo "$config" | jq --arg name "$name" --argjson profile "$profile_data" '.profiles[$name] = $profile')
-    
-    # Save configuration
-    local password
-    if ! password=$(get_verified_master_password); then
-        return 1
-    fi
-    
-    if ! save_session_config "$config" "$password"; then
-        log_error "Failed to save configuration"
+    # Create profile in SQLite database
+    if ! create_profile "$name" "$model_name" "$description" "$env_vars"; then
+        log_error "Failed to create profile"
         return 1
     fi
     
@@ -285,39 +264,69 @@ cmd_add() {
 
 # List all profiles with enhanced formatting
 cmd_list() {
-    local config
-    if ! config=$(get_session_config); then
-        return 1
-    fi
+    local profile_count
+    profile_count=$(get_profile_count)
     
-    local profiles
-    profiles=$(echo "$config" | jq -r '.profiles | keys[]' 2>/dev/null)
-    
-    if [[ -z "$profiles" ]]; then
+    if [[ "$profile_count" -eq 0 ]]; then
         log_info "No profiles configured yet."
         log_info "Use 'lam add <profile_name>' to add a profile."
         return 0
     fi
     
     echo
+    local profile_names
+    profile_names=$(get_profile_names)
+    
     while IFS= read -r profile_name; do
-        local profile
-        profile=$(echo "$config" | jq -r ".profiles[\"$profile_name\"]")
-        
-        if [[ -n "$profile" && "$profile" != "null" ]]; then
-            local model_name description env_vars env_keys
-            model_name=$(echo "$profile" | jq -r '.model_name // "Not specified"')
-            description=$(echo "$profile" | jq -r '.description // "No description"')
-            env_vars=$(echo "$profile" | jq -r '.env_vars')
-            env_keys=$(echo "$env_vars" | jq -r 'keys | join(", ")')
+        if [[ -n "$profile_name" ]]; then
+            local profile_json
+            profile_json=$(get_profile "$profile_name")
             
-            echo -e "${PURPLE}• Profile: $profile_name${NC}"
-            log_gray "  ├─ Model Name: $model_name"
-            log_gray "  ├─ Description: $description"
-            log_gray "  └─ Environment Variables: $env_keys"
-            echo
+            if [[ "$profile_json" != "null" ]]; then
+                # Parse JSON manually (simple extraction)
+                local model_name description env_vars_json
+                model_name=$(echo "$profile_json" | grep -o '"model_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"model_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "Not specified")
+                description=$(echo "$profile_json" | grep -o '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "No description")
+                
+                # Extract environment variable keys from env_vars section only
+                local env_vars_section env_keys
+                # First check if env_vars exists and is not empty
+                if echo "$profile_json" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{[[:space:]]*}'; then
+                    # Empty env_vars object
+                    env_keys="(none)"
+                elif echo "$profile_json" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{.*}'; then
+                    # Non-empty env_vars object
+                    env_vars_section=$(echo "$profile_json" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
+                    env_keys=""
+                    
+                    if [[ -n "$env_vars_section" ]]; then
+                        while read -r pair; do
+                            if [[ -n "$pair" ]]; then
+                                local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                                if [[ -n "$env_keys" ]]; then
+                                    env_keys="$env_keys, $key"
+                                else
+                                    env_keys="$key"
+                                fi
+                            fi
+                        done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+                    fi
+                    
+                    if [[ -z "$env_keys" ]]; then
+                        env_keys="(none)"
+                    fi
+                else
+                    env_keys="(none)"
+                fi
+                
+                echo -e "${PURPLE}• Profile: $profile_name${NC}"
+                log_gray "  ├─ Model Name: $model_name"
+                log_gray "  ├─ Description: $description"
+                log_gray "  └─ Environment Variables: $env_keys"
+                echo
+            fi
         fi
-    done <<< "$profiles"
+    done <<< "$profile_names"
 
     log_info "💡 Get details for a profile: ${PURPLE}lam show <profile_name>${NC}"
     echo
@@ -333,63 +342,83 @@ cmd_show() {
         return 1
     fi
     
-    local config
-    if ! config=$(get_session_config); then
-        return 1
+    # Check if profile exists
+    if ! profile_exists "$name"; then
+        log_error "Profile '$name' not found!"
+        log_info "Available profiles:"
+        get_profile_names | sed 's/^/• /'
+        exit 1
     fi
     
     local profile
-    profile=$(echo "$config" | jq -r ".profiles[\"$name\"]" 2>/dev/null)
-    
-    if [[ "$profile" == "null" ]]; then
-        log_error "Profile '$name' not found!"
-        log_info "Available profiles:"
-        echo "$config" | jq -r '.profiles | keys[]' | sed 's/^/• /'
-        exit 1
-    fi
+    profile=$(get_profile "$name")
     
     echo -e "${BLUE}Profile Details${NC}"
     echo "===================="
     echo -e "${PURPLE}• Profile Name${NC}: $name"
     
-    local model_name
-    model_name=$(echo "$profile" | jq -r '.model_name // "Not specified"')
-    echo -e "${PURPLE}• Model Name${NC}: $model_name"
+    # Parse profile JSON manually
+    local model_name description created last_used
+    model_name=$(echo "$profile" | grep -o '"model_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"model_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "Not specified")
+    description=$(echo "$profile" | grep -o '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "No description")
+    created=$(echo "$profile" | grep -o '"created"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"created"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "Unknown")
+    last_used=$(echo "$profile" | grep -o '"last_used"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"last_used"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "Never")
     
-    local description
-    description=$(echo "$profile" | jq -r '.description // "No description"')
+    # Handle null values
+    if [[ "$last_used" == "null" || -z "$last_used" ]]; then
+        last_used="Never"
+    fi
+    
+    echo -e "${PURPLE}• Model Name${NC}: $model_name"
     echo -e "${PURPLE}• Description${NC}: $description"
     
     echo
-    local created
-    created=$(echo "$profile" | jq -r '.created // "Unknown"')
     echo -e "${PURPLE}• Created${NC}: $created"
-    
-    local last_used
-    last_used=$(echo "$profile" | jq -r '.last_used // "Never"')
     echo -e "${PURPLE}• Last Used${NC}: $last_used"
     
     echo 
     # Show environment variables with masked values
     echo -e "${PURPLE}• Environment Variables${NC}:"
     
-    local env_vars
-    env_vars=$(echo "$profile" | jq -r '.env_vars')
-    
-    while IFS= read -r key; do
-        local value
-        value=$(echo "$env_vars" | jq -r ".[\"$key\"]")
+    # Extract and display environment variables
+    # Check if env_vars exists and is not empty
+    if echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{[[:space:]]*}'; then
+        # Empty env_vars object
+        echo -e "  └─ ${GRAY}(no environment variables)${NC}"
+    elif echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{.*}'; then
+        # Non-empty env_vars object
+        local env_vars_section
+        env_vars_section=$(echo "$profile" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
         
-        # Mask the value for security (show first 4 and last 4 characters)
-        local masked_value
-        if [[ ${#value} -gt 8 ]]; then
-            masked_value="${value:0:4}...${value: -4}"
+        if [[ -n "$env_vars_section" ]]; then
+            local found_vars=false
+            while read -r pair; do
+                if [[ -n "$pair" ]]; then
+                    found_vars=true
+                    local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                    local value=$(echo "$pair" | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
+                    
+                    # Mask the value for security (show first 4 and last 4 characters)
+                    local masked_value
+                    if [[ ${#value} -gt 8 ]]; then
+                        masked_value="${value:0:4}...${value: -4}"
+                    else
+                        masked_value="***"
+                    fi
+                    
+                    echo -e "  └─ ${GREEN}$key${NC} = $masked_value"
+                fi
+            done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+            
+            if [[ "$found_vars" == false ]]; then
+                echo -e "  └─ ${GRAY}(no environment variables)${NC}"
+            fi
         else
-            masked_value="***"
+            echo -e "  └─ ${GRAY}(no environment variables)${NC}"
         fi
-        
-        echo -e "  └─ ${GREEN}$key${NC} = $masked_value"
-    done <<< "$(echo "$env_vars" | jq -r 'keys[]')"
+    else
+        echo -e "  └─ ${GRAY}(no environment variables)${NC}"
+    fi
     
     echo 
     echo '------------------------------------'
@@ -406,20 +435,23 @@ cmd_use() {
         echo "Usage: lam use <profile_name>"
         return 1
     fi
-        
-    local config
-    if ! config=$(get_session_config); then
+    
+    # Verify master password for sensitive operation
+    if ! get_verified_master_password >/dev/null; then
+        log_error "Authentication failed"
         return 1
+    fi
+        
+    # Check if profile exists
+    if ! profile_exists "$name"; then
+        log_error "Profile '$name' not found!" >&2
+        log_info "Available profiles:" >&2
+        get_profile_names | sed 's/^/• /' >&2
+        exit 1
     fi
     
     local profile
-    profile=$(echo "$config" | jq -r ".profiles[\"$name\"]" 2>/dev/null)
-    if [[ "$profile" == "null" ]]; then
-        log_error "Profile '$name' not found!" >&2
-        log_info "Available profiles:" >&2
-        echo "$config" | jq -r '.profiles | keys[]' | sed 's/^/• /' >&2
-        exit 1
-    fi
+    profile=$(get_profile "$name")
 
     # Check if we're being called within eval (stdout will be captured)
     if [[ -t 1 ]]; then
@@ -427,35 +459,53 @@ cmd_use() {
         return 0
     fi
     
-    local env_vars
-    env_vars=$(echo "$profile" | jq -r '.env_vars')
+    # Parse model name
     local model_name
-    model_name=$(echo "$profile" | jq -r '.model_name')
+    model_name=$(echo "$profile" | grep -o '"model_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"model_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "unknown")
     
     # Update last used timestamp
-    config=$(echo "$config" | jq ".profiles[\"$name\"].last_used = \"$(date -Iseconds)\"") || {
-        log_error "Failed to update last used timestamp"
-        return 1
-    }
-    
-    # Get password for saving
-    local password
-    if ! password=$(get_verified_master_password); then
-        return 1
-    fi
-    
-    if ! save_session_config "$config" "$password"; then
+    if ! update_profile_last_used "$name"; then
         log_error "Failed to save configuration"
         return 1
     fi
     
-    echo "$env_vars" | jq -r 'to_entries[] | "export \(.key)='"'"'\(.value)'"'"'"'
+    # Export environment variables for shell sourcing
+    echo "# LAM Profile: $name (Model: $model_name)"
+    
+    # Extract and export environment variables
+    local exported_vars=""
+    
+    # Check if env_vars exists and is not empty
+    if echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{[[:space:]]*}'; then
+        # Empty env_vars object - no variables to export
+        exported_vars=""
+    elif echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{.*}'; then
+        # Non-empty env_vars object
+        local env_vars_section
+        env_vars_section=$(echo "$profile" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
+        
+        if [[ -n "$env_vars_section" ]]; then
+            while read -r pair; do
+                if [[ -n "$pair" ]]; then
+                    local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                    local value=$(echo "$pair" | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
+                    
+                    if [[ -n "$key" && -n "$value" ]]; then
+                        echo "export $key='$value'"
+                        if [[ -n "$exported_vars" ]]; then
+                            exported_vars="$exported_vars, $key"
+                        else
+                            exported_vars="$key"
+                        fi
+                    fi
+                fi
+            done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+        fi
+    fi
+    
     echo "export LLM_CURRENT_PROFILE='$name'"
-
-    local exported_vars
-    exported_vars=$(echo "$env_vars" | jq -r 'keys | join(", ")')
-    log_success "Profile ${GREEN}'$name'${NC} activated!"
-    log_info "Variables exported: $exported_vars, LLM_CURRENT_PROFILE"
+    log_success "Profile ${GREEN}'$name'${NC} activated!" >&2
+    log_info "Variables exported: $exported_vars, LLM_CURRENT_PROFILE" >&2
 }
 
 # Edit existing configuration with enhanced validation
@@ -468,38 +518,70 @@ cmd_edit() {
         exit 1
     fi
     
-    local config
-    if ! config=$(get_session_config); then
+    # Verify master password for sensitive operation
+    if ! get_verified_master_password >/dev/null; then
+        log_error "Authentication failed"
+        exit 1
+    fi
+    
+    # Check if profile exists
+    if ! profile_exists "$name"; then
+        log_error "Profile '$name' not found!"
+        echo
+        log_info "Available profiles:"
+        get_profile_names | sed 's/^/• /'
         exit 1
     fi
     
     local profile
-    profile=$(echo "$config" | jq -r ".profiles[\"$name\"]" 2>/dev/null)
-    
-    if [[ "$profile" == "null" ]]; then
-        log_error "Profile '$name' not found!"
-        echo
-        log_info "Available profiles:"
-        echo "$config" | jq -r '.profiles | keys[]' | sed 's/^/• /'
-        exit 1
-    fi
+    profile=$(get_profile "$name")
     
     # Show current profile details
     echo -e "${BLUE}Editing profile${NC}"
     echo "====================="
     echo -e "${PURPLE}• Profile Name${NC}: $name"
 
-    local model_name
-    model_name=$(echo "$profile" | jq -r '.model_name // "Not specified"')
-    echo -e "${PURPLE}• Model Name${NC}: $model_name"
+    # Parse current profile data
+    local model_name description
+    model_name=$(echo "$profile" | grep -o '"model_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"model_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "Not specified")
+    description=$(echo "$profile" | grep -o '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "No description")
 
-    local description
-    description=$(echo "$profile" | jq -r '.description // "No description"')
+    echo -e "${PURPLE}• Model Name${NC}: $model_name"
     echo -e "${PURPLE}• Description${NC}: $description"
 
-    local env_vars
-    env_vars=$(echo "$profile" | jq -r '.env_vars | keys | join(", ")')
-    echo -e "${PURPLE}• Environment Variables${NC}: $env_vars"
+    # Extract environment variable keys
+    local env_keys
+    
+    # Check if env_vars exists and is not empty
+    if echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{[[:space:]]*}'; then
+        # Empty env_vars object
+        env_keys="(none)"
+    elif echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{.*}'; then
+        # Non-empty env_vars object
+        local env_vars_section
+        env_vars_section=$(echo "$profile" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
+        env_keys=""
+        
+        if [[ -n "$env_vars_section" ]]; then
+            while read -r pair; do
+                if [[ -n "$pair" ]]; then
+                    local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                    if [[ -n "$env_keys" ]]; then
+                        env_keys="$env_keys, $key"
+                    else
+                        env_keys="$key"
+                    fi
+                fi
+            done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+        fi
+        
+        if [[ -z "$env_keys" ]]; then
+            env_keys="(none)"
+        fi
+    else
+        env_keys="(none)"
+    fi
+    echo -e "${PURPLE}• Environment Variables${NC}: $env_keys"
     
     while true; do
         echo
@@ -548,17 +630,53 @@ cmd_edit() {
                 fi
                 
                 # Check if new name already exists
-                local existing_profile
-                existing_profile=$(echo "$config" | jq -r ".profiles[\"$new_name\"]" 2>/dev/null)
-                if [[ "$existing_profile" != "null" ]]; then
+                if profile_exists "$new_name"; then
                     log_error "Profile '$new_name' already exists!"
                     return 1
                 fi
                 
-                # Remove old profile and add with new name
-                config=$(echo "$config" | jq --arg old_name "$name" --arg new_name "$new_name" --argjson profile "$profile" 'del(.profiles[$old_name]) | .profiles[$new_name] = $profile')
-                name="$new_name"  # Update name variable for success message
-                log_success "Profile name changed to: $new_name"
+                # Create new profile with new name and delete old one
+                local current_model_name current_description
+                current_model_name=$(echo "$profile" | grep -o '"model_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"model_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+                current_description=$(echo "$profile" | grep -o '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+                
+                # Extract current environment variables correctly
+                local current_env_vars_section
+                current_env_vars_section=$(echo "$profile" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
+                
+                # Build env_vars JSON
+                local env_vars_json="{"
+                local first=true
+                
+                if [[ -n "$current_env_vars_section" ]]; then
+                    while read -r pair; do
+                        if [[ -n "$pair" ]]; then
+                            local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                            local value=$(echo "$pair" | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
+                            
+                            if [[ -n "$key" && -n "$value" ]]; then
+                                if [[ "$first" == true ]]; then
+                                    first=false
+                                else
+                                    env_vars_json+=","
+                                fi
+                                env_vars_json+="\"$key\":\"$value\""
+                            fi
+                        fi
+                    done <<< "$(echo "$current_env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+                fi
+                
+                env_vars_json+="}"
+                
+                # Create new profile and delete old one
+                if create_profile "$new_name" "$current_model_name" "$current_description" "$env_vars_json" && delete_profile "$name"; then
+                    name="$new_name"  # Update name variable for success message
+                    profile=$(get_profile "$name")  # Refresh profile data
+                    log_success "Profile name changed to: $new_name"
+                else
+                    log_error "Failed to rename profile"
+                    return 1
+                fi
                 ;;
             "2")
                 # Edit model name
@@ -580,8 +698,14 @@ cmd_edit() {
                     continue
                 fi
                 
-                profile=$(echo "$profile" | jq --arg model "$new_model_name" '.model_name = $model')
-                log_success "Model name updated successfully: $new_model_name"
+                # Update model name in database
+                if update_profile "$name" "$new_model_name" "" ""; then
+                    profile=$(get_profile "$name")  # Refresh profile data
+                    log_success "Model name updated successfully: $new_model_name"
+                else
+                    log_error "Failed to update model name"
+                    return 1
+                fi
                 ;;
             "3")
                 # Edit description only
@@ -595,27 +719,58 @@ cmd_edit() {
                 if [[ -z "$new_description" ]]; then
                     new_description="No description provided"
                 fi
-                profile=$(echo "$profile" | jq --arg desc "$new_description" '.description = $desc')
-                log_success "Description updated successfully: $new_description"
+                
+                # Update description in database
+                if update_profile "$name" "" "$new_description" ""; then
+                    profile=$(get_profile "$name")  # Refresh profile data
+                    log_success "Description updated successfully: $new_description"
+                else
+                    log_error "Failed to update description"
+                    return 1
+                fi
                 ;;
             "4")
                 # Edit environment variables individually
-                local current_env_vars
-                current_env_vars=$(echo "$profile" | jq -r '.env_vars')
-                
                 echo
                 echo -e "${BLUE}Current environment variables${NC}"
-                echo "$current_env_vars" | jq -r 'keys[]' | while read -r key; do
-                    local value
-                    value=$(echo "$current_env_vars" | jq -r ".[\"$key\"]")
-                    local masked_value
-                    if [[ ${#value} -gt 8 ]]; then
-                        masked_value="${value:0:4}...${value: -4}"
+                
+                # Extract and display current environment variables
+                # Check if env_vars exists and is not empty
+                if echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{[[:space:]]*}'; then
+                    # Empty env_vars object
+                    echo -e "${GRAY}(no environment variables)${NC}"
+                elif echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{.*}'; then
+                    # Non-empty env_vars object
+                    local env_vars_section
+                    env_vars_section=$(echo "$profile" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
+                    
+                    if [[ -n "$env_vars_section" ]]; then
+                        local found_vars=false
+                        while read -r pair; do
+                            if [[ -n "$pair" ]]; then
+                                found_vars=true
+                                local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                                local value=$(echo "$pair" | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
+                                
+                                local masked_value
+                                if [[ ${#value} -gt 8 ]]; then
+                                    masked_value="${value:0:4}...${value: -4}"
+                                else
+                                    masked_value="***"
+                                fi
+                                echo -e "${GREEN}• $key${NC} = $masked_value"
+                            fi
+                        done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+                        
+                        if [[ "$found_vars" == false ]]; then
+                            echo -e "${GRAY}(no environment variables)${NC}"
+                        fi
                     else
-                        masked_value="***"
+                        echo -e "${GRAY}(no environment variables)${NC}"
                     fi
-                    echo -e "${GREEN}• $key${NC} = $masked_value"
-                done
+                else
+                    echo -e "${GRAY}(no environment variables)${NC}"
+                fi
                 echo
                 
                 while true; do
@@ -657,10 +812,25 @@ cmd_edit() {
                                 continue
                             fi
                             
-                            # Check if key already exists
-                            local existing_value
-                            existing_value=$(echo "$current_env_vars" | jq -r ".[\"$new_env_name\"] // null")
-                            if [[ "$existing_value" != "null" ]]; then
+                            # Get current env vars and check if key exists
+                            local current_profile_json current_env_vars_section
+                            current_profile_json=$(get_profile "$name")
+                            current_env_vars_section=$(echo "$current_profile_json" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
+                            
+                            local key_exists=false
+                            if [[ -n "$current_env_vars_section" ]]; then
+                                while read -r pair; do
+                                    if [[ -n "$pair" ]]; then
+                                        local existing_key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                                        if [[ "$existing_key" == "$new_env_name" ]]; then
+                                            key_exists=true
+                                            break
+                                        fi
+                                    fi
+                                done <<< "$(echo "$current_env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+                            fi
+                            
+                            if [[ "$key_exists" == true ]]; then
                                 log_warning "Environment variable '$new_env_name' already exists!"
                                 echo -n "Overwrite? (y/N): "
                                 local overwrite_confirm
@@ -669,12 +839,63 @@ cmd_edit() {
                                 fi
                             fi
                             
-                            current_env_vars=$(echo "$current_env_vars" | jq --arg key "$new_env_name" --arg value "$new_env_value" '.[$key] = $value')
-                            log_success "Added/Updated: $new_env_name"
+                            # Build new env vars JSON
+                            local new_env_vars_json="{"
+                            local first=true
+                            
+                            # Add existing vars (except the one we're updating)
+                            if [[ -n "$current_env_vars_section" ]]; then
+                                while read -r pair; do
+                                    if [[ -n "$pair" ]]; then
+                                        local existing_key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                                        local existing_value=$(echo "$pair" | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
+                                        
+                                        if [[ "$existing_key" != "$new_env_name" ]]; then
+                                            if [[ "$first" == true ]]; then
+                                                first=false
+                                            else
+                                                new_env_vars_json+=","
+                                            fi
+                                            new_env_vars_json+="\"$existing_key\":\"$existing_value\""
+                                        fi
+                                    fi
+                                done <<< "$(echo "$current_env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+                            fi
+                            
+                            # Add the new/updated variable
+                            if [[ "$first" == true ]]; then
+                                first=false
+                            else
+                                new_env_vars_json+=","
+                            fi
+                            new_env_vars_json+="\"$new_env_name\":\"$new_env_value\""
+                            new_env_vars_json+="}"
+                            
+                            # Update profile with new env vars
+                            if update_profile "$name" "" "" "$new_env_vars_json"; then
+                                profile=$(get_profile "$name")  # Refresh profile data
+                                log_success "Added/Updated: $new_env_name"
+                            else
+                                log_error "Failed to update environment variable"
+                                return 1
+                            fi
                             ;;
                         "2")
-                            local env_keys
-                            env_keys=($(echo "$current_env_vars" | jq -r 'keys[]'))
+                            # Get current environment variables
+                            local current_profile_json current_env_vars_section
+                            current_profile_json=$(get_profile "$name")
+                            current_env_vars_section=$(echo "$current_profile_json" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
+                            
+                            # Build array of env var keys
+                            local env_keys=()
+                            if [[ -n "$current_env_vars_section" ]]; then
+                                while read -r pair; do
+                                    if [[ -n "$pair" ]]; then
+                                        local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                                        env_keys+=("$key")
+                                    fi
+                                done <<< "$(echo "$current_env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+                            fi
                             
                             if [[ ${#env_keys[@]} -eq 0 ]]; then
                                 log_warning "No environment variables to delete!"
@@ -706,8 +927,36 @@ cmd_edit() {
                                 continue
                             fi
                             
-                            current_env_vars=$(echo "$current_env_vars" | jq --arg key "$key_to_delete" 'del(.[$key])')
-                            log_success "Deleted: $key_to_delete"
+                            # Build new env vars JSON without the deleted key
+                            local new_env_vars_json="{"
+                            local first=true
+                            if [[ -n "$current_env_vars_section" ]]; then
+                                while read -r pair; do
+                                    if [[ -n "$pair" ]]; then
+                                        local existing_key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                                        local existing_value=$(echo "$pair" | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
+                                        
+                                        if [[ "$existing_key" != "$key_to_delete" ]]; then
+                                            if [[ "$first" == true ]]; then
+                                                first=false
+                                            else
+                                                new_env_vars_json+=","
+                                            fi
+                                            new_env_vars_json+="\"$existing_key\":\"$existing_value\""
+                                        fi
+                                    fi
+                                done <<< "$(echo "$current_env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+                            fi
+                            new_env_vars_json+="}"
+                            
+                            # Update profile
+                            if update_profile "$name" "" "" "$new_env_vars_json"; then
+                                profile=$(get_profile "$name")  # Refresh profile data
+                                log_success "Deleted: $key_to_delete"
+                            else
+                                log_error "Failed to delete environment variable"
+                                return 1
+                            fi
                             ;;
                         "3")
                             log_info "Exit environment variable editing."
@@ -720,7 +969,6 @@ cmd_edit() {
                     echo
                 done
                 
-                profile=$(echo "$profile" | jq --argjson env_vars "$current_env_vars" '.env_vars = $env_vars')
                 ;;
             "5")
                 break
@@ -732,20 +980,6 @@ cmd_edit() {
         esac
     done
 
-    # Update the profile in config
-    config=$(echo "$config" | jq --arg name "$name" --argjson profile "$profile" '.profiles[$name] = $profile')
-    
-    # Save configuration
-    local password
-    if ! password=$(get_verified_master_password); then
-        return 1
-    fi
-    
-    if ! save_session_config "$config" "$password"; then
-        log_error "Failed to save configuration"
-        return 1
-    fi
-    
     log_success "Profile '$name' updated successfully!"
 }
 
@@ -759,32 +993,68 @@ cmd_delete() {
         exit 1
     fi
     
-    local config
-    if ! config=$(get_session_config); then
+    # Verify master password for sensitive operation
+    if ! get_verified_master_password >/dev/null; then
+        log_error "Authentication failed"
+        exit 1
+    fi
+    
+    # Check if profile exists
+    if ! profile_exists "$name"; then
+        log_error "Profile '$name' not found!"
+        echo
+        log_info "Available profiles:"
+        get_profile_names | sed 's/^/• /'
         exit 1
     fi
     
     local profile
-    profile=$(echo "$config" | jq -r ".profiles[\"$name\"]" 2>/dev/null)
-    
-    if [[ "$profile" == "null" ]]; then
-        log_error "Profile '$name' not found!"
-        echo
-        log_info "Available profiles:"
-        echo "$config" | jq -r '.profiles | keys[]' | sed 's/^/• /'
-        exit 1
-    fi
+    profile=$(get_profile "$name")
     
     # Show profile details before deletion
     echo -e "${RED}Profile to delete${NC}"
     echo "=================="
-    local description
-    description=$(echo "$profile" | jq -r '.description // "No description"')
+    
+    # Parse profile data
+    local description env_keys
+    description=$(echo "$profile" | grep -o '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "No description")
+    
+    # Extract environment variable keys
+    local env_keys
+    
+    # Check if env_vars exists and is not empty
+    if echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{[[:space:]]*}'; then
+        # Empty env_vars object
+        env_keys="(none)"
+    elif echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{.*}'; then
+        # Non-empty env_vars object
+        local env_vars_section
+        env_vars_section=$(echo "$profile" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
+        env_keys=""
+        
+        if [[ -n "$env_vars_section" ]]; then
+            while read -r pair; do
+                if [[ -n "$pair" ]]; then
+                    local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                    if [[ -n "$env_keys" ]]; then
+                        env_keys="$env_keys, $key"
+                    else
+                        env_keys="$key"
+                    fi
+                fi
+            done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+        fi
+        
+        if [[ -z "$env_keys" ]]; then
+            env_keys="(none)"
+        fi
+    else
+        env_keys="(none)"
+    fi
+    
     echo -e "${PURPLE}Name${NC}: $name"
     echo -e "${PURPLE}Description${NC}: $description"
-    local env_vars
-    env_vars=$(echo "$profile" | jq -r '.env_vars | keys | join(", ")')
-    echo -e "${PURPLE}Environment Variables${NC}: $env_vars"
+    echo -e "${PURPLE}Environment Variables${NC}: $env_keys"
     echo
     
     log_warning "⚠️  This action cannot be undone!"
@@ -800,17 +1070,9 @@ cmd_delete() {
         return 0
     fi
     
-    # Remove profile from config
-    config=$(echo "$config" | jq --arg name "$name" 'del(.profiles[$name])')
-    
-    # Save configuration
-    local password
-    if ! password=$(get_verified_master_password); then
-        return 1
-    fi
-    
-    if ! save_session_config "$config" "$password"; then
-        log_error "Failed to save configuration"
+    # Delete profile from database
+    if ! delete_profile "$name"; then
+        log_error "Failed to delete profile"
         return 1
     fi
     

@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 
-# LAM Configuration Module
-# Configuration management, loading, saving, and validation
+# LAM Configuration Module - SQLite Backend
+# Database management, CRUD operations for profiles and environment variables
 
-# Initialize configuration directory
+# ================================ Database Setup ================================
+
+# Create configuration directory
 init_config_dir() {
+
     if [[ ! -d "$CONFIG_DIR" ]]; then
         if ! mkdir -p "$CONFIG_DIR"; then
             log_error "Failed to create config directory: $CONFIG_DIR"
+            log_info "You can manually create it by running: mkdir -p $CONFIG_DIR"
             return 1
         fi
         
@@ -21,158 +25,503 @@ init_config_dir() {
     return 0
 }
 
-# Validate configuration structure
-validate_config() {
-    local config="$1"
-    
-    # Check if it's valid JSON
-    if ! echo "$config" | jq empty 2>/dev/null; then
-        log_error "Configuration is not valid JSON"
-        return 1
-    fi
-    
-    # Check if it has the required structure
-    if ! echo "$config" | jq -e '.profiles' >/dev/null 2>&1; then
-        log_error "Configuration missing 'profiles' section"
-        return 1
-    fi
-    
-    return 0
-}
+# Initialize database with schema
+init_database() {    
+    # Create database and tables
+    local schema="
+        -- Profiles table
+        CREATE TABLE IF NOT EXISTS profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            model_name TEXT NOT NULL,
+            description TEXT DEFAULT 'No description provided',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used TEXT,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
 
-# Get configuration from session or decrypt from file
-get_session_config() {
-    # Try to get from session first
-    if is_session_valid; then
-        local cached_config="$CONFIG_DIR/.cached_config"
-        if [[ -f "$cached_config" ]]; then
-            cat "$cached_config"
-            return 0
-        fi
-    fi
-    
-    # Need to decrypt from file
-    local password
-    if ! password=$(get_verified_master_password); then
-        return 1
-    fi
-    
-    local config
-    if ! config=$(decrypt_data "$(cat "$CONFIG_FILE")" "$password"); then
-        return 1
-    fi
-    
-    # Validate configuration
-    if ! validate_config "$config"; then
-        return 1
-    fi
-    
-    # Cache the config and create session
-    local cached_config="$CONFIG_DIR/.cached_config"
-    if ! echo "$config" > "$cached_config"; then
-        log_warning "Failed to cache configuration"
-    else
-        chmod 600 "$cached_config"
-    fi
-    
-    if ! create_session "$password"; then
-        log_warning "Failed to create session"
-    fi
-    
-    echo "$config"
-}
+        -- Environment variables table (normalized design)
+        CREATE TABLE IF NOT EXISTS profile_env_vars (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id INTEGER NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            FOREIGN KEY (profile_id) REFERENCES profiles (id) ON DELETE CASCADE,
+            UNIQUE (profile_id, key)
+        );
 
-# Save config with validation and atomic operations
-save_session_config() {
-    local config="$1"
-    local password="$2"
+        -- Metadata table
+        CREATE TABLE IF NOT EXISTS metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        -- Indexes for performance
+        CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name);
+        CREATE INDEX IF NOT EXISTS idx_env_vars_profile_id ON profile_env_vars(profile_id);
+        CREATE INDEX IF NOT EXISTS idx_env_vars_key ON profile_env_vars(key);
+        
+        -- Triggers to update updated_at timestamp
+        CREATE TRIGGER IF NOT EXISTS update_profiles_timestamp 
+        AFTER UPDATE ON profiles
+        BEGIN
+            UPDATE profiles SET updated_at = datetime('now') WHERE id = NEW.id;
+        END;
+    "
     
-    if [[ -z "$config" || -z "$password" ]]; then
-        log_error "Configuration and password are required"
+    if ! execute_sql "$schema"; then
+        log_error "Failed to initialize database schema"
         return 1
     fi
     
-    # Validate configuration before saving
-    if ! validate_config "$config"; then
-        return 1
-    fi
+    # Set initial metadata
+    set_metadata "version" "$(get_version_info | cut -d'|' -f1)"
+    set_metadata "created" "$(date -Iseconds)"
     
-    # Create temporary file for atomic operation
-    local temp_file
-    if ! temp_file=$(create_temp_file); then
-        return 1
-    fi
-    
-    # Encrypt and save to temporary file
-    local encrypted_config
-    if ! encrypted_config=$(encrypt_data "$config" "$password"); then
-        log_error "Failed to encrypt configuration"
-        return 1
-    fi
-    
-    if ! echo "$encrypted_config" > "$temp_file"; then
-        log_error "Failed to write encrypted configuration"
-        return 1
-    fi
-    
-    # Atomic move to final location
-    if ! mv "$temp_file" "$CONFIG_FILE"; then
-        log_error "Failed to save configuration file"
-        return 1
-    fi
-    
-    # Set secure permissions
-    chmod 600 "$CONFIG_FILE" || {
-        log_error "Failed to set configuration file permissions"
+    # Set secure permissions on database file
+    chmod 600 "$DB_FILE" || {
+        log_error "Failed to set database file permissions"
         return 1
     }
     
-    # Update cached config
-    local cached_config="$CONFIG_DIR/.cached_config"
-    if ! echo "$config" > "$cached_config"; then
-        log_warning "Failed to update cached configuration"
-    else
-        chmod 600 "$cached_config"
+    return 0
+}
+
+
+# ================================ SQL Execution ================================
+
+# Execute SQL command with optional result output
+# Usage: execute_sql "SQL_COMMAND" [return_results]
+# - If return_results is "true" or "1", returns query results
+# - Otherwise, executes command silently and returns exit code
+execute_sql() {
+    local sql="$1"
+    local return_results="${2:-false}"
+    
+    if [[ -z "$sql" ]]; then
+        log_error "SQL command is required"
+        return 1
     fi
     
-    # Update session
-    if ! create_session "$password"; then
-        log_warning "Failed to update session"
+    if [[ "$return_results" == "true" || "$return_results" == "1" ]]; then
+        # Return results for SELECT queries
+        sqlite3 "$DB_FILE" "$sql" 2>/dev/null || {
+            log_error "Failed to execute SQL query"
+            return 1
+        }
+    else
+        # Execute without output for INSERT/UPDATE/DELETE
+        if ! sqlite3 "$DB_FILE" "$sql" 2>/dev/null; then
+            log_error "Failed to execute SQL command"
+            return 1
+        fi
+        return 0
+    fi
+}
+
+
+# ================================ Profile CRUD Operations ================================
+
+# Check if profile exists
+profile_exists() {
+    local name="$1"
+    
+    if [[ -z "$name" ]]; then
+        log_error "Profile name is required"
+        return 1
+    fi
+    
+    local count
+    count=$(execute_sql "SELECT COUNT(*) FROM profiles WHERE name = '$name';" true)
+    
+    [[ "$count" -gt 0 ]]
+}
+
+# Create new profile
+create_profile() {
+    local name="$1"
+    local model_name="$2"
+    local description="$3"
+    local env_vars_json="$4"
+    
+    if [[ -z "$name" || -z "$model_name" ]]; then
+        log_error "Profile name and model name are required"
+        return 1
+    fi
+    
+    # Escape single quotes in SQL
+    name=$(printf '%s' "$name" | sed "s/'/''/g")
+    model_name=$(printf '%s' "$model_name" | sed "s/'/''/g")
+    description=$(printf '%s' "${description:-No description provided}" | sed "s/'/''/g")
+    
+    # Insert profile
+    local profile_sql="
+        INSERT INTO profiles (name, model_name, description, created_at)
+        VALUES ('$name', '$model_name', '$description', datetime('now'));
+    "
+    
+    if ! execute_sql "$profile_sql"; then
+        log_error "Failed to create profile"
+        return 1
+    fi
+    
+    # Get profile ID
+    local profile_id
+    profile_id=$(execute_sql "SELECT id FROM profiles WHERE name = '$name';" true)
+    
+    if [[ -z "$profile_id" ]]; then
+        log_error "Failed to retrieve profile ID"
+        return 1
+    fi
+    
+    # Insert environment variables if provided
+    if [[ -n "$env_vars_json" && "$env_vars_json" != "{}" ]]; then
+        # Parse JSON and insert each key-value pair
+        # Note: We'll implement a simple parser since we no longer have jq
+        local temp_file
+        if ! temp_file=$(create_temp_file); then
+            return 1
+        fi
+        
+        echo "$env_vars_json" > "$temp_file"
+        
+        # Extract key-value pairs (simple JSON parsing)
+        while IFS=':' read -r key value; do
+            if [[ -n "$key" && -n "$value" ]]; then
+                # Clean up the key and value
+                key=$(echo "$key" | xargs)
+                value=$(echo "$value" | xargs)
+                
+                if [[ -n "$key" && -n "$value" ]]; then
+                    # Escape single quotes
+                    key=$(printf '%s' "$key" | sed "s/'/''/g")
+                    value=$(printf '%s' "$value" | sed "s/'/''/g")
+                    
+                    local env_sql="
+                        INSERT INTO profile_env_vars (profile_id, key, value)
+                        VALUES ($profile_id, '$key', '$value');
+                    "
+                    
+                    if ! execute_sql "$env_sql"; then
+                        log_warning "Failed to insert environment variable: $key"
+                    fi
+                fi
+            fi
+        done < <(echo "$env_vars_json" | sed 's/[{}"]//g' | tr ',' '\n' | grep ':')
     fi
     
     return 0
 }
 
-# Load configuration (legacy function for compatibility)
-load_config() {
-    local password="$1"
+# Get profile by name (returns JSON format for compatibility)
+get_profile() {
+    local name="$1"
     
-    if [[ ! -f "$CONFIG_FILE" ]]; then
-        log_error "Configuration file not found: $CONFIG_FILE"
+    if [[ -z "$name" ]]; then
+        log_error "Profile name is required"
         return 1
     fi
     
-    if [[ -z "$password" ]]; then
-        log_error "Password is required to load configuration"
+    # Escape single quotes
+    name=$(printf '%s' "$name" | sed "s/'/''/g")
+    
+    # Get profile data
+    local profile_data
+    profile_data=$(execute_sql "
+        SELECT id, model_name, description, created_at, last_used, updated_at
+        FROM profiles 
+        WHERE name = '$name';
+    " true)
+    
+    if [[ -z "$profile_data" ]]; then
+        echo "null"
         return 1
     fi
     
-    local config
-    if ! config=$(decrypt_data "$(cat "$CONFIG_FILE")" "$password"); then
-        return 1
+    # Parse profile data
+    local id model_name description created_at last_used updated_at
+    IFS='|' read -r id model_name description created_at last_used updated_at <<< "$profile_data"
+    
+    # Get environment variables
+    local env_vars_data
+    env_vars_data=$(execute_sql "
+        SELECT key, value
+        FROM profile_env_vars 
+        WHERE profile_id = $id;
+    " true)
+    
+    # Build JSON response (manual construction since no jq)
+    local env_vars_json='{'
+    local first=true
+    
+    while IFS='|' read -r key value; do
+        if [[ -n "$key" ]]; then
+            if [[ "$first" == true ]]; then
+                first=false
+            else
+                env_vars_json+=','
+            fi
+            env_vars_json+="\"$key\":\"$value\""
+        fi
+    done <<< "$env_vars_data"
+    
+    env_vars_json+='}'
+    
+    # Construct final JSON
+    local last_used_json="null"
+    if [[ -n "$last_used" && "$last_used" != "" ]]; then
+        last_used_json="\"$last_used\""
     fi
     
-    if ! validate_config "$config"; then
-        return 1
-    fi
-    
-    echo "$config"
+    cat << EOF
+{
+    "env_vars": $env_vars_json,
+    "model_name": "$model_name",
+    "description": "$description",
+    "created": "$created_at",
+    "last_used": $last_used_json
+}
+EOF
 }
 
-# Save configuration (legacy function for compatibility)
-save_config() {
-    local config="$1"
-    local password="$2"
+# Get all profiles (returns JSON array for compatibility)
+get_all_profiles() {
+    local profiles_data
+    profiles_data=$(execute_sql "
+        SELECT name, model_name, description, created_at, last_used
+        FROM profiles 
+        ORDER BY name;
+    " true)
     
-    save_session_config "$config" "$password"
+    if [[ -z "$profiles_data" ]]; then
+        echo '[]'
+        return 0
+    fi
+    
+    # Build JSON array
+    local json_array='['
+    local first=true
+    
+    while IFS='|' read -r name model_name description created_at last_used; do
+        if [[ -n "$name" ]]; then
+            if [[ "$first" == true ]]; then
+                first=false
+            else
+                json_array+=','
+            fi
+            
+            local last_used_json="null"
+            if [[ -n "$last_used" && "$last_used" != "" ]]; then
+                last_used_json="\"$last_used\""
+            fi
+            
+            json_array+="{\"name\":\"$name\",\"model_name\":\"$model_name\",\"description\":\"$description\",\"created\":\"$created_at\",\"last_used\":$last_used_json}"
+        fi
+    done <<< "$profiles_data"
+    
+    json_array+=']'
+    echo "$json_array"
+}
+
+# Get profile names only
+get_profile_names() {
+    execute_sql "SELECT name FROM profiles ORDER BY name;" true
+}
+
+# Get profile count
+get_profile_count() {
+    execute_sql "SELECT COUNT(*) FROM profiles;" true
+}
+
+# Update profile
+update_profile() {
+    local name="$1"
+    local model_name="$2"
+    local description="$3"
+    local env_vars_json="$4"
+    
+    if [[ -z "$name" ]]; then
+        log_error "Profile name is required"
+        return 1
+    fi
+    
+    if ! profile_exists "$name"; then
+        log_error "Profile '$name' does not exist"
+        return 1
+    fi
+    
+    # Escape single quotes
+    name=$(printf '%s' "$name" | sed "s/'/''/g")
+    
+    # Update profile if model_name or description provided
+    if [[ -n "$model_name" || -n "$description" ]]; then
+        local update_sql="UPDATE profiles SET"
+        local updates=()
+        
+        if [[ -n "$model_name" ]]; then
+            model_name=$(printf '%s' "$model_name" | sed "s/'/''/g")
+            updates+=("model_name = '$model_name'")
+        fi
+        
+        if [[ -n "$description" ]]; then
+            description=$(printf '%s' "$description" | sed "s/'/''/g")
+            updates+=("description = '$description'")
+        fi
+        
+        # Join updates with commas
+        local IFS=','
+        update_sql+=" ${updates[*]} WHERE name = '$name';"
+        
+        if ! execute_sql "$update_sql"; then
+            log_error "Failed to update profile"
+            return 1
+        fi
+    fi
+    
+    # Update environment variables if provided
+    if [[ -n "$env_vars_json" ]]; then
+        # Get profile ID
+        local profile_id
+        profile_id=$(execute_sql "SELECT id FROM profiles WHERE name = '$name';" true)
+        
+        # Clear existing environment variables
+        execute_sql "DELETE FROM profile_env_vars WHERE profile_id = $profile_id;"
+        
+        # Insert new environment variables
+        if [[ "$env_vars_json" != "{}" ]]; then
+            while IFS=':' read -r key value; do
+                if [[ -n "$key" && -n "$value" ]]; then
+                    key=$(echo "$key" | xargs)
+                    value=$(echo "$value" | xargs)
+                    
+                    if [[ -n "$key" && -n "$value" ]]; then
+                        key=$(printf '%s' "$key" | sed "s/'/''/g")
+                        value=$(printf '%s' "$value" | sed "s/'/''/g")
+                        
+                        local env_sql="
+                            INSERT INTO profile_env_vars (profile_id, key, value)
+                            VALUES ($profile_id, '$key', '$value');
+                        "
+                        
+                        execute_sql "$env_sql"
+                    fi
+                fi
+            done < <(echo "$env_vars_json" | sed 's/[{}"]//g' | tr ',' '\n' | grep ':')
+        fi
+    fi
+    
+    return 0
+}
+
+# Update profile last used timestamp
+update_profile_last_used() {
+    local name="$1"
+    
+    if [[ -z "$name" ]]; then
+        log_error "Profile name is required"
+        return 1
+    fi
+    
+    name=$(printf '%s' "$name" | sed "s/'/''/g")
+    
+    local sql="
+        UPDATE profiles 
+        SET last_used = datetime('now')
+        WHERE name = '$name';
+    "
+    
+    execute_sql "$sql"
+}
+
+# Delete profile
+delete_profile() {
+    local name="$1"
+    
+    if [[ -z "$name" ]]; then
+        log_error "Profile name is required"
+        return 1
+    fi
+    
+    if ! profile_exists "$name"; then
+        log_error "Profile '$name' does not exist"
+        return 1
+    fi
+    
+    name=$(printf '%s' "$name" | sed "s/'/''/g")
+    
+    # Delete profile (cascade will handle env vars)
+    local sql="DELETE FROM profiles WHERE name = '$name';"
+    
+    execute_sql "$sql"
+}
+
+# ================================ Metadata Operations ================================
+
+# Set metadata key-value pair
+set_metadata() {
+    local key="$1"
+    local value="$2"
+    
+    if [[ -z "$key" || -z "$value" ]]; then
+        log_error "Metadata key and value are required"
+        return 1
+    fi
+    
+    key=$(printf '%s' "$key" | sed "s/'/''/g")
+    value=$(printf '%s' "$value" | sed "s/'/''/g")
+    
+    local sql="
+        INSERT OR REPLACE INTO metadata (key, value)
+        VALUES ('$key', '$value');
+    "
+    
+    execute_sql "$sql"
+}
+
+# Get metadata value
+get_metadata() {
+    local key="$1"
+    
+    if [[ -z "$key" ]]; then
+        log_error "Metadata key is required"
+        return 1
+    fi
+    
+    key=$(printf '%s' "$key" | sed "s/'/''/g")
+    
+    execute_sql "SELECT value FROM metadata WHERE key = '$key';" true
+}
+
+# ================================ Migration and Compatibility ================================
+
+# Check if LAM is initialized (database exists and has tables)
+check_initialization() {
+    local DB_FILE
+    DB_FILE=$DB_FILE
+    
+    if [[ ! -f "$DB_FILE" ]]; then
+        return 1
+    fi
+    
+    # Check if profiles table exists
+    local table_count
+    table_count=$(execute_sql "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='profiles';" true 2>/dev/null)
+    
+    [[ "$table_count" -eq 1 ]]
+}
+
+# Export database to JSON format (for backup compatibility)
+export_to_json() {
+    local profiles_data
+    profiles_data=$(get_all_profiles)
+    
+    local version
+    version=$(get_metadata "version" 2>/dev/null || echo "unknown")
+    
+    cat << EOF
+{
+    "version": "$version",
+    "profiles": $(echo "$profiles_data" | sed 's/\[/{\n/g; s/\]/\n}/g; s/},{/,\n/g')
+}
+EOF
 }

@@ -7,6 +7,7 @@
 get_master_password() {
     local prompt="${1:-Enter master password: }"
     local password
+    local length_verified="${2:-false}"
     
     # Ensure we're reading from terminal
     if [[ ! -t 0 ]]; then
@@ -30,7 +31,7 @@ get_master_password() {
         return 1
     }
     
-    echo -n "$prompt" >&2
+    echo -en "$prompt" >&2
     
     # Read password with timeout
     if ! read -r password; then
@@ -42,22 +43,94 @@ get_master_password() {
     echo >&2  # Add newline after password input
     
     # Validate password length
-    if [[ ${#password} -lt $MIN_PASSWORD_LENGTH ]]; then
-        log_error "Password must be at least $MIN_PASSWORD_LENGTH characters long"
-        return 1
-    fi
-    
-    if [[ ${#password} -gt $MAX_PASSWORD_LENGTH ]]; then
-        log_error "Password exceeds maximum length of $MAX_PASSWORD_LENGTH characters"
-        return 1
-    fi
-    
-    # Validate input
-    if ! validate_input_length "$password" "$MAX_PASSWORD_LENGTH"; then
-        return 1
+    if [[ "$length_verified" == "true" || "$length_verified" == "1" ]]; then
+        if [[ ${#password} -lt $MIN_PASSWORD_LENGTH ]]; then
+            log_error "Password must be at least $MIN_PASSWORD_LENGTH characters long"
+            return 1
+        fi
+        
+        if [[ ${#password} -gt $MAX_PASSWORD_LENGTH ]]; then
+            log_error "Password exceeds maximum length of $MAX_PASSWORD_LENGTH characters"
+            return 1
+        fi
     fi
     
     echo "$password"
+}
+
+# Get and verify master password
+get_verified_master_password() {
+    local password
+    local prompt="${1:-Enter master password: }"
+    if ! password=$(get_master_password "$prompt"); then
+        return 1
+    fi
+    
+    # Test password by trying to decrypt verification file
+    local verification_file="$CONFIG_DIR/.auth"
+    local db_file="$CONFIG_DIR/profiles.db"
+    
+    # If verification file exists, use it to verify password
+    if [[ -f "$verification_file" ]]; then
+        local test_decrypt
+        if ! test_decrypt=$(decrypt_data "$(cat "$verification_file")" "$password" 2>/dev/null); then
+            log_error "Incorrect master password!"
+            return 1
+        fi
+        
+        # Verify the decrypted content is correct
+        if [[ "$test_decrypt" != "LAM_AUTH_CHECK" ]]; then
+            log_error "Password verification failed!"
+            return 1
+        fi
+    # If only SQLite database exists without verification file, this is an error
+    elif [[ -f "$db_file" ]]; then
+        log_error "Password verification file missing!"
+        log_info "This may indicate a corrupted installation."
+        log_info "Please run 'lam init' to reinitialize LAM."
+        return 1
+    else
+        log_error "No LAM configuration found!"
+        log_info "Please run 'lam init' first to initialize LAM."
+        return 1
+    fi
+    
+    # Create a session for successful password verification
+    if ! create_session "$password"; then
+        log_warning "Failed to create session, but password verification succeeded"
+    fi
+    
+    echo "$password"
+}
+
+# Create password verification file for SQLite setups
+create_auth_file() {
+    local password="$1"
+    
+    if [[ -z "$password" ]]; then
+        log_error "Password is required for verification file creation"
+        return 1
+    fi
+            
+    # Encrypt a simple verification string with the password
+    local encrypted_verification
+    if ! encrypted_verification=$(encrypt_data "LAM_AUTH_CHECK" "$password"); then
+        log_error "Failed to create password verification"
+        return 1
+    fi
+    
+    # Create password authentication file
+    if ! echo "$encrypted_verification" > "$AUTH_FILE"; then
+        log_error "Failed to save password verification file"
+        return 1
+    fi
+    
+    chmod 600 "$AUTH_FILE" || {
+        log_error "Failed to set verification file permissions"
+        return 1
+    }
+    
+    return 0
 }
 
 # Encrypt data using AES-256-CBC
@@ -92,23 +165,6 @@ decrypt_data() {
         log_error "Failed to decrypt data - incorrect password or corrupted data"
         return 1
     }
-}
-
-# Get and verify master password
-get_verified_master_password() {
-    local password
-    if ! password=$(get_master_password); then
-        return 1
-    fi
-    
-    # Test password by trying to decrypt config
-    local test_decrypt
-    if ! test_decrypt=$(decrypt_data "$(cat "$CONFIG_FILE")" "$password" 2>/dev/null); then
-        log_error "Incorrect master password!"
-        return 1
-    fi
-    
-    echo "$password"
 }
 
 # Check if session is valid

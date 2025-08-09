@@ -154,24 +154,62 @@ backup_create() {
     echo
     
     # Get current configuration for metadata
-    local config
-    if config=$(get_session_config 2>/dev/null); then
+    if check_initialization; then
         local profile_count
-        profile_count=$(echo "$config" | jq -r '.profiles | length' 2>/dev/null || echo "0")
+        profile_count=$(get_profile_count)
         
         # Extract profile information
-        local profile_names
-        local profile_details
-        profile_names=$(echo "$config" | jq -r '.profiles | keys[]' 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+        local profile_names_list
+        profile_names_list=$(get_profile_names | tr '\n' ',' | sed 's/,$//')
         
         # Create profile details array with comprehensive info (without sensitive values)
-        profile_details=$(echo "$config" | jq -c '.profiles | to_entries | map({
-            name: .key,
-            env_var_names: (.value.env_vars | keys),
-            model_name: (.value.model_name // "not specified"),
-            description: (.value.description // "no description"),
-            created: (.value.created // "unknown")
-        })' 2>/dev/null || echo '[]')
+        local profile_details="["
+        local first=true
+        local profile_names
+        profile_names=$(get_profile_names)
+        
+        while IFS= read -r profile_name; do
+            if [[ -n "$profile_name" ]]; then
+                local profile_json
+                profile_json=$(get_profile "$profile_name")
+                
+                # Parse profile data
+                local model_name description created_at
+                model_name=$(echo "$profile_json" | grep -o '"model_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"model_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "not specified")
+                description=$(echo "$profile_json" | grep -o '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "no description")
+                created_at=$(echo "$profile_json" | grep -o '"created"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"created"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "unknown")
+                
+                # Extract environment variable names correctly
+                local env_vars_section env_var_names
+                env_vars_section=$(echo "$profile_json" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
+                env_var_names="["
+                local env_first=true
+                
+                if [[ -n "$env_vars_section" ]]; then
+                    while read -r pair; do
+                        if [[ -n "$pair" ]]; then
+                            local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
+                            if [[ "$env_first" == true ]]; then
+                                env_first=false
+                            else
+                                env_var_names+=","
+                            fi
+                            env_var_names+="\"$key\""
+                        fi
+                    done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+                fi
+                
+                env_var_names+="]"
+                
+                if [[ "$first" == true ]]; then
+                    first=false
+                else
+                    profile_details+=","
+                fi
+                profile_details+="{\"name\":\"$profile_name\",\"env_var_names\":$env_var_names,\"model_name\":\"$model_name\",\"description\":\"$description\",\"created\":\"$created_at\"}"
+            fi
+        done <<< "$profile_names"
+        profile_details+="]"
         
         # Create backup with metadata
         local temp_dir

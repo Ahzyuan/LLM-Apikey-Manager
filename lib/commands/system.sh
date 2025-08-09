@@ -5,9 +5,19 @@
 
 # Show LAM status and statistics
 cmd_status() {
-    local config
-    if ! config=$(get_session_config); then
+    # Check if LAM is initialized
+    if ! check_initialization; then
+        log_error "LAM is not initialized"
         return 1
+    fi
+    
+    # Check if session exists and is valid, if not create one
+    if [[ ! -f "$SESSION_FILE" ]] || ! is_session_valid; then
+        if ! get_verified_master_password >/dev/null; then
+            log_error "Authentication failed"
+            return 1
+        fi
+        echo
     fi
     
     echo "LAM Status & Statistics"
@@ -23,36 +33,62 @@ cmd_status() {
         session_age=$(( $(date +%s) - $(stat -c %Y "$SESSION_FILE" 2>/dev/null || echo 0) ))
         log_gray "• Session Age: ${session_age}s / ${SESSION_TIMEOUT}s"
     else
-        log_gray "• Status: Expired (should verify master password again)"
-        log_gray "• Session Age: 0s / ${SESSION_TIMEOUT}s"
+        log_gray "• Status: Session creation failed"
+        log_gray "• Session Age: N/A"
     fi
     echo
     
     # Profile statistics
     local profile_count
-    profile_count=$(echo "$config" | jq -r '.profiles | length')
+    profile_count=$(get_profile_count)
     
     echo -e "${BLUE}Profile Details${NC}"
     echo "---------------"
     
     if [[ "$profile_count" -gt 0 ]]; then
         local current_profile="${LLM_CURRENT_PROFILE:-}"
+        local profile_names
+        profile_names=$(get_profile_names)
         
         while IFS= read -r profile_name; do
-            local profile
-            profile=$(echo "$config" | jq -r ".profiles[\"$profile_name\"]")
-            local env_count
-            env_count=$(echo "$profile" | jq -r '.env_vars | length')
-            local last_used
-            last_used=$(echo "$profile" | jq -r '.last_used // "Never"')
-            
-            # Check if this is the active profile
-            if [[ "$profile_name" == "$current_profile" ]]; then
-                echo -e "• ${GREEN}$profile_name (active)${NC}: $env_count env vars, last used: $last_used"
-            else
-                log_gray "• $profile_name: $env_count env vars, last used: $last_used"
+            if [[ -n "$profile_name" ]]; then
+                local profile
+                profile=$(get_profile "$profile_name")
+                
+                # Parse environment variable count
+                local env_count=0
+                
+                # Check if env_vars exists and is not empty - simplified approach
+                if echo "$profile" | grep -q '"env_vars".*:.*{}'; then
+                    # Empty env_vars object
+                    env_count=0
+                elif echo "$profile" | grep -q '"env_vars".*:.*{.*}'; then
+                    # Non-empty env_vars object - count the key-value pairs
+                    local env_vars_content
+                    env_vars_content=$(echo "$profile" | sed -n 's/.*"env_vars"[[:space:]]*:[[:space:]]*{\([^}]*\)}.*/\1/p')
+                    
+                    if [[ -n "$env_vars_content" && "$env_vars_content" != "" ]]; then
+                        # Count the number of key-value pairs by counting commas + 1
+                        env_count=$(echo "$env_vars_content" | grep -o ',' | wc -l)
+                        env_count=$((env_count + 1))
+                    fi
+                fi
+                
+                # Parse last used
+                local last_used
+                last_used=$(echo "$profile" | grep -o '"last_used"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"last_used"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "Never")
+                if [[ "$last_used" == "null" || -z "$last_used" ]]; then
+                    last_used="Never"
+                fi
+                
+                # Check if this is the active profile
+                if [[ "$profile_name" == "$current_profile" ]]; then
+                    echo -e "• ${GREEN}$profile_name (active)${NC}: $env_count env vars, last used: $last_used"
+                else
+                    log_gray "• $profile_name: $env_count env vars, last used: $last_used"
+                fi
             fi
-        done <<< "$(echo "$config" | jq -r '.profiles | keys[]')"
+        done <<< "$profile_names"
     else
         echo "No profiles configured yet."
         echo "Use 'lam add <profile_name>' to add a profile."
@@ -171,6 +207,16 @@ show_manual_update_instructions() {
 
 # Uninstall LAM with complete cleanup
 cmd_uninstall() {
+    # Verify master password for this sensitive operation
+    if check_initialization 2>/dev/null; then
+        log_info "Please verify your master password before uninstalling:"
+        if ! get_verified_master_password >/dev/null; then
+            log_error "Authentication failed - cannot uninstall without password verification"
+            return 1
+        fi
+        echo
+    fi
+    
     log_warning "This will completely remove LAM from your system!"
     echo
     echo "The following will be removed:"
@@ -340,16 +386,7 @@ cmd_uninstall() {
     fi
     
     echo
-    log_success "LAM has been completely removed from your system!"
-    
-    # Show completion message
-    local install_dir
-    install_dir=$(dirname "$wrapper_script")
-    if [[ -n "$install_dir" && "$install_dir" != "/" ]]; then
-        log_info "You may want to remove $install_dir from your PATH if it was added specifically for LAM"
-    fi
-    
-    log_info "Goodbye! 👋"
+    log_success "LAM has been completely removed from your system! Goodbye! 👋"
     
     # If we're running the wrapper script, just exit
     # If we're running the main executable, use self-deletion
