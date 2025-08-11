@@ -97,29 +97,6 @@ init_database() {
     return 0
 }
 
-check_initialization() {
-    
-    if [[ ! -f "$DB_FILE" ]]; then
-        log_error "No LAM configuration found!"
-        log_info "Please run 'lam init' first to initialize LAM."
-        return 1
-    fi
-    
-    # Check if profiles table exists
-    local table_count
-    table_count=$(execute_sql "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='profiles';" true 2>/dev/null)
-    
-    if [[ "$table_count" -ne 1 ]]; then
-        log_error "LAM configuration is corrupted!"
-        log_info "You should need to run 'lam init' to reinitialize LAM."
-        rm -rf "$DB_FILE" || {
-            log_error "Failed to remove corrupted LAM configuration."
-            log_info "Please manually delete the file '$DB_FILE' before reinitializing LAM."
-        }
-        return 1
-    fi
-}
-
 # ------------------------------------- SQL Execution -------------------------------------
 
 # Execute SQL command with optional result output

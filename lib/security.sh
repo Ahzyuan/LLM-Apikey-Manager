@@ -296,7 +296,7 @@ get_master_password() {
         fi
     fi
     
-    echo "$password"
+    echo "$(sanitize_input $password)"
 }
 
 # Get and verify master password
@@ -463,7 +463,7 @@ get_verified_master_password() {
         log_warning "Password verification passed, but failed to create session"
     fi
     
-    echo "$password"
+    echo "$(sanitize_input $password)"
 }
 
 # ----------------------------------- En/Decrypt -----------------------------------
