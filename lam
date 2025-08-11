@@ -22,9 +22,9 @@ else
     CONFIG_DIR="$HOME/.config/lam"
 fi
 
-AUTH_FILE="$CONFIG_DIR/.auth"
 DB_FILE="$CONFIG_DIR/profiles.db"   # SQLite database file 
 SESSION_FILE="$CONFIG_DIR/.session"  # store session status, age, etc
+BACKUP_DIR="$HOME/.lam-backups"
 
 # Security constants
 readonly MAX_PASSWORD_LENGTH=256

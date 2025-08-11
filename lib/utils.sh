@@ -77,7 +77,7 @@ check_initialization() {
     if [[ ! -f "$DB_FILE" ]]; then
         log_error "LAM is not initialized!"
         log_info "Please run 'lam init' first to set up your master password."
-        exit 1
+        return 1
     fi
 }
 

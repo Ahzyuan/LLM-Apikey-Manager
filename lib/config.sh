@@ -55,6 +55,16 @@ init_database() {
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        
+        -- Master password verification table (tamper-resistant)
+        CREATE TABLE IF NOT EXISTS auth_verification (
+            id INTEGER PRIMARY KEY CHECK (id = 1), -- Only allow one row
+            password_hash TEXT NOT NULL,           -- SHA-256 hash of master password
+            encrypted_info TEXT NOT NULL,  -- Self-encrypted verification data
+            salt TEXT NOT NULL,                   -- Random salt for additional security
+            checksum TEXT NOT NULL,               -- Integrity checksum
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
 
         -- Indexes for performance
         CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name);
@@ -455,6 +465,28 @@ delete_profile() {
     execute_sql "$sql"
 }
 
+clear_all_profiles() {
+    local clear_sql="
+        BEGIN TRANSACTION;
+        DELETE FROM profiles;
+        DELETE FROM auth_verification;
+        COMMIT;
+    "
+    
+    if ! execute_sql "$clear_sql"; then
+        log_error "Failed to clear all profiles"
+        log_info "Fall back to delete the whole database..."
+        rm -rf "$DB_FILE" || {
+            log_error "Operation failed!"
+            log_info "You can manually delete it by running: ${PURPLE}rm -rf $DB_FILE${NC}"
+            log_info "After that, please re-init LAM by running: ${PURPLE}lam init${NC}."
+            return 1
+        }
+    fi
+    
+    return 0
+}
+
 # ================================ Metadata Operations ================================
 
 # Set metadata key-value pair
@@ -496,10 +528,10 @@ get_metadata() {
 
 # Check if LAM is initialized (database exists and has tables)
 check_initialization() {
-    local DB_FILE
-    DB_FILE=$DB_FILE
     
     if [[ ! -f "$DB_FILE" ]]; then
+        log_error "No LAM configuration found!"
+        log_info "Please run 'lam init' first to initialize LAM."
         return 1
     fi
     
@@ -507,7 +539,15 @@ check_initialization() {
     local table_count
     table_count=$(execute_sql "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='profiles';" true 2>/dev/null)
     
-    [[ "$table_count" -eq 1 ]]
+    if [[ ! "$table_count" -eq 1 ]]; then
+        log_error "LAM configuration is corrupted!"
+        log_info "You should need to run 'lam init' to reinitialize LAM."
+        rm -rf "$DB_FILE" || {
+            log_error "Failed to remove corrupted LAM configuration."
+            log_info "Please manually delete the file '$DB_FILE' before reinitializing LAM."
+        }
+        return 1
+    fi
 }
 
 # Export database to JSON format (for backup compatibility)
