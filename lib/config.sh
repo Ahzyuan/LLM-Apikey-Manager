@@ -3,7 +3,7 @@
 # LAM Configuration Module - SQLite Backend
 # Database management, CRUD operations for profiles and environment variables
 
-# ================================ Database Setup ================================
+# ----------------------------------- Database Setup -----------------------------------
 
 # Create configuration directory
 init_config_dir() {
@@ -97,8 +97,30 @@ init_database() {
     return 0
 }
 
+check_initialization() {
+    
+    if [[ ! -f "$DB_FILE" ]]; then
+        log_error "No LAM configuration found!"
+        log_info "Please run 'lam init' first to initialize LAM."
+        return 1
+    fi
+    
+    # Check if profiles table exists
+    local table_count
+    table_count=$(execute_sql "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='profiles';" true 2>/dev/null)
+    
+    if [[ "$table_count" -ne 1 ]]; then
+        log_error "LAM configuration is corrupted!"
+        log_info "You should need to run 'lam init' to reinitialize LAM."
+        rm -rf "$DB_FILE" || {
+            log_error "Failed to remove corrupted LAM configuration."
+            log_info "Please manually delete the file '$DB_FILE' before reinitializing LAM."
+        }
+        return 1
+    fi
+}
 
-# ================================ SQL Execution ================================
+# ------------------------------------- SQL Execution -------------------------------------
 
 # Execute SQL command with optional result output
 # Usage: execute_sql "SQL_COMMAND" [return_results]
@@ -130,7 +152,7 @@ execute_sql() {
 }
 
 
-# ================================ Profile CRUD Operations ================================
+# -------------------------------- Profile CRUD Operations --------------------------------
 
 # Check if profile exists
 profile_exists() {
@@ -487,7 +509,7 @@ clear_all_profiles() {
     return 0
 }
 
-# ================================ Metadata Operations ================================
+# ----------------------------------- Metadata Operations -----------------------------------
 
 # Set metadata key-value pair
 set_metadata() {
@@ -522,46 +544,4 @@ get_metadata() {
     key=$(printf '%s' "$key" | sed "s/'/''/g")
     
     execute_sql "SELECT value FROM metadata WHERE key = '$key';" true
-}
-
-# ================================ Migration and Compatibility ================================
-
-# Check if LAM is initialized (database exists and has tables)
-check_initialization() {
-    
-    if [[ ! -f "$DB_FILE" ]]; then
-        log_error "No LAM configuration found!"
-        log_info "Please run 'lam init' first to initialize LAM."
-        return 1
-    fi
-    
-    # Check if profiles table exists
-    local table_count
-    table_count=$(execute_sql "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='profiles';" true 2>/dev/null)
-    
-    if [[ ! "$table_count" -eq 1 ]]; then
-        log_error "LAM configuration is corrupted!"
-        log_info "You should need to run 'lam init' to reinitialize LAM."
-        rm -rf "$DB_FILE" || {
-            log_error "Failed to remove corrupted LAM configuration."
-            log_info "Please manually delete the file '$DB_FILE' before reinitializing LAM."
-        }
-        return 1
-    fi
-}
-
-# Export database to JSON format (for backup compatibility)
-export_to_json() {
-    local profiles_data
-    profiles_data=$(get_all_profiles)
-    
-    local version
-    version=$(get_metadata "version" 2>/dev/null || echo "unknown")
-    
-    cat << EOF
-{
-    "version": "$version",
-    "profiles": $(echo "$profiles_data" | sed 's/\[/{\n/g; s/\]/\n}/g; s/},{/,\n/g')
-}
-EOF
 }

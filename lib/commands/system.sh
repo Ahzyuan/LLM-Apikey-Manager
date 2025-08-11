@@ -1,7 +1,142 @@
 #!/usr/bin/env bash
 
 # LAM System Related Commands
-# Functions: status, update, uninstall
+# Functions: init, status, update, uninstall
+
+# Initialize the tool with enhanced security
+cmd_init() {
+    # Check if already initialized
+    init_config_dir || return 1
+    
+    if check_initialization 2>/dev/null; then
+        # Check if password verification exists in database
+        log_info "LAM is already initialized! Now you have triggered a re-initialization."
+        log_info "Reinitialization is designed for those who've ${PURPLE}forgotten${NC} or want to ${PURPLE}change${NC} their master password."
+        
+        echo -en "${RED}Have you forgotten your master password?${NC} (y/N): "
+        local forgot_password
+        if ! read -r forgot_password; then
+            log_error "Failed to read confirmation"
+            return 1
+        fi
+
+        if [[ $forgot_password == [Yy] ]]; then
+            # User forgot master password - require system user authentication
+            echo
+            log_warning "Given that you have forgotten your master password, all profiles encrypted with it cannot be accessed now."
+            log_warning "Therefore, due to security considerations, we will ${RED}delete all of the existing profiles and backups${NC}."
+            log_warning "To prevent any form of impersonation, we need to verify your identity before proceeding."
+            
+            authenticate_user_passwd || return 1
+            
+            log_success "System user authenticated successfully."
+
+            echo 
+            log_warning "⚠️  Now we will ${RED}permanently delete${NC} all existing profiles!"
+            echo -en "${RED}Sure to proceed?${NC} (y/N): "
+            local del_confirm
+            if ! read -r del_confirm; then
+                log_error "Failed to read final confirmation"
+                return 1
+            fi
+            
+            if [[ "${del_confirm,,}" != "y" ]]; then
+                log_info "Operation cancelled."
+                return 0
+            else
+                rm -rf "$CONFIG_DIR" || {
+                    log_error "Failed to delete existing profiles"
+                    log_info "Please manually delete the profiles directory ($CONFIG_DIR) and try again."
+                    return 1
+                }
+
+                rm -rf "$BACKUP_DIR" || {
+                    log_error "Failed to delete existing backups"
+                    log_info "Please manually delete the profiles directory ($BACKUP_DIR) and try again."
+                    return 1
+                }
+                mkdir -p "$CONFIG_DIR"
+            fi
+
+            log_success "All profiles and backups deleted. Now you can reset your master password."
+            
+        else
+            # User remembers master password - verify it
+            local old_password
+            old_password=$(
+                get_verified_master_password \
+                "${BLUE}Verify your master password to re-init LAM?${NC}: "
+            )
+            
+            if [[ $? -ne 0 ]]; then
+                return 1
+            fi
+            
+            log_success "Master password verified successfully."
+
+            echo
+            log_info "Now you can set a new master password for your profiles."
+            log_info "Changing master password ${PURPLE}won't${NC} affect your existing profiles!"
+            log_info "After the change is completed, the old password will be replaced by the new one and become invalid!"
+            echo -en "${BLUE}Do you want to change your master password?${NC} (y/N): "
+            local change_confirm
+            if ! read -r change_confirm; then
+                log_error "Failed to read confirmation"
+                return 1
+            fi
+
+            if [[ "${change_confirm,,}" == "y" ]]; then
+                renew_master_password
+            else
+                echo 
+                log_info "Nothing remains to do. Exiting..."
+                return 0
+            fi
+        fi
+
+        echo
+        echo '-----------------------------------------'
+        echo
+    fi
+    
+    log_info "Initializing LAM (LLM API Manager)"
+    echo
+    echo "In the following process, you'll need to set up a master password."
+    echo "This master password is used to encrypt, decrypt, and access all your API profiles."
+    echo
+    log_gray "⚠️   The master password can only be set ${PURPLE}ONCE${GRAY} during initialization"
+    log_gray "⚠️   Set a strong password (≥ 8 characters) and store it carefully, there's ${PURPLE}no${GRAY} password recovery option"
+    log_gray "⚠️   If you forget it, you'll need to ${PURPLE}re-init${GRAY} LAM and it will ${PURPLE}delete all data${NC}."
+    echo
+    
+    local password confirm_password
+    if ! password=$(get_master_password "Set master password: " true); then
+        return 1
+    fi
+    
+    if ! confirm_password=$(get_master_password "Confirm master password: "); then
+        return 1
+    fi
+    
+    if [[ "$password" != "$confirm_password" ]]; then
+        log_error "Passwords do not match!"
+        return 1
+    fi
+    
+    # Initialize SQLite database
+    if ! init_database; then
+        return 1
+    fi
+    
+    # Store password verification in database
+    if ! init_auth_credential "$password"; then
+        return 1
+    fi
+    
+    echo
+    log_success "LAM initialized successfully!"
+    log_info "💡 You can now add API profiles using: ${PURPLE}lam add <profile_name>${NC}"
+}
 
 # Show LAM status and statistics
 cmd_status() {

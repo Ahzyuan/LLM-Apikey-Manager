@@ -3,59 +3,67 @@
 # LAM Security Module
 # Password handling, encryption, and security functions
 
-# Secure password reading function
-get_master_password() {
-    local prompt="${1:-Enter master password: }"
-    local password
-    local length_verified="${2:-false}"
+# ----------------------------------- Auth Verification -----------------------------------
+
+# Store master password verification in database
+init_auth_credential() {
+    local password="$1"
     
-    # Ensure we're reading from terminal
-    if [[ ! -t 0 ]]; then
-        log_error "Password input requires interactive terminal"
+    if [[ -z "$password" ]]; then
+        log_error "Password is required for creating authentication credential"
         return 1
     fi
     
-    # Disable echo and set up cleanup
-    local old_settings
-    old_settings=$(stty -g) || {
-        log_error "Failed to save terminal settings"
-        return 1
-    }
-    
-    # Set up trap to restore settings
-    trap 'stty "$old_settings" 2>/dev/null' RETURN
-    
-    # Disable echo
-    stty -echo || {
-        log_error "Failed to disable echo"
-        return 1
-    }
-    
-    echo -en "$prompt" >&2
-    
-    # Read password with timeout
-    if ! read -r password; then
-        echo >&2
-        log_error "Failed to read password"
+    # Generate random salt (32 bytes, base64 encoded)
+    local salt
+    if ! salt=$(openssl rand -base64 32 2>/dev/null); then
+        log_error "Failed to generate random salt"
         return 1
     fi
     
-    echo >&2  # Add newline after password input
+    # Create SHA-256 hash of password + salt
+    local password_hash
+    if ! password_hash=$(echo -n "${password}${salt}" | openssl dgst -sha256 -binary | openssl base64 -A 2>/dev/null); then
+        log_error "Failed to create password hash"
+        return 1
+    fi
     
-    # Validate password length
-    if [[ "$length_verified" == "true" || "$length_verified" == "1" ]]; then
-        if [[ ${#password} -lt $MIN_PASSWORD_LENGTH ]]; then
-            log_error "Password must be at least $MIN_PASSWORD_LENGTH characters long"
-            return 1
-        fi
+    # Create verification data (known plaintext for encryption test)
+    local verification_data="LAM_AUTH_VERIFICATION:${salt}:$(date -Iseconds)"
+    
+    # Encrypt verification data with master password
+    local encrypted_info
+    if ! encrypted_info=$(encrypt_data "$verification_data" "$password"); then
+        log_error "Failed to encrypt verification data"
+        return 1
+    fi
+    
+    # Create integrity checksum (SHA-256 of all components)
+    local checksum_input="${password_hash}|${encrypted_info}|${salt}"
+    local checksum
+    if ! checksum=$(echo -n "$checksum_input" | openssl dgst -sha256 -binary | openssl base64 -A 2>/dev/null); then
+        log_error "Failed to create integrity checksum"
+        return 1
+    fi
         
-        if [[ ${#password} -gt $MAX_PASSWORD_LENGTH ]]; then
-            log_error "Password exceeds maximum length of $MAX_PASSWORD_LENGTH characters"
-            return 1
-        fi
+    # Store in database using proper SQL escaping for base64 data
+    local sql="
+        INSERT OR REPLACE INTO auth_verification (id, password_hash, encrypted_info, salt, checksum)
+        VALUES (
+            1, 
+            '$(echo "$password_hash" | sed "s/'/''/g")', 
+            '$(echo "$encrypted_info" | sed "s/'/''/g")', 
+            '$(echo "$salt" | sed "s/'/''/g")', 
+            '$(echo "$checksum" | sed "s/'/''/g")'
+        );
+    "
+    
+    if ! execute_sql "$sql"; then
+        log_error "Failed to store password verification in database"
+        return 1
     fi
     
-    echo "$password"
+    return 0
 }
 
 # Verify master password by decrypting existing profile data
@@ -186,6 +194,111 @@ verify_auth_credential() {
     return 0
 }
 
+# Authenticate user identity when master password is forgotten
+authenticate_user_passwd() {
+    local current_user
+    current_user=$(whoami)
+    
+    log_info "Authenticating user: ${PURPLE}$current_user${NC}"
+    
+    # Method 1: Try sudo authentication (most common)
+    if command -v sudo >/dev/null 2>&1; then        
+        if sudo -v 2>/dev/null; then
+            return 0
+        else
+            log_warning "Sudo authentication failed"
+        fi
+    fi
+    echo
+    
+    # Method 2: Try su authentication as fallback
+    if command -v su >/dev/null 2>&1; then
+        log_info "Attempting alternative authentication method..."
+        echo -e "Please enter the password of user ${PURPLE}$current_user${NC}:"
+        
+        # Use su to verify user credentials
+        if echo "exit 0" | su "$current_user" -c "exit 0" 2>/dev/null; then
+            return 0
+        else
+            log_warning "Alternative authentication failed"
+        fi
+    fi
+    echo
+    
+    # Method 3: File-based verification (create a file that requires user permissions)
+    log_info "Attempting file-based authentication verification..."
+    
+    local test_file="$CONFIG_DIR/.auth_test_$$"
+    touch "$test_file" 2>/dev/null
+    
+    # Verify the file was created by the current user
+    if [[ -f "$test_file" && -O "$test_file" ]]; then
+        rm -f "$test_file" 2>/dev/null
+        return 0
+    fi
+    echo 
+    
+    log_error "User authentication failed"
+    return 1
+}
+
+# ----------------------------------- Password Retrieval ----------------------------------- 
+
+# Secure password reading function
+get_master_password() {
+    local prompt="${1:-Enter master password: }"
+    local password
+    local length_verified="${2:-false}"
+    
+    # Ensure we're reading from terminal
+    if [[ ! -t 0 ]]; then
+        log_error "Password input requires interactive terminal"
+        return 1
+    fi
+    
+    # Disable echo and set up cleanup
+    local old_settings
+    old_settings=$(stty -g) || {
+        log_error "Failed to save terminal settings"
+        return 1
+    }
+    
+    # Set up trap to restore settings
+    trap 'stty "$old_settings" 2>/dev/null' RETURN
+    
+    # Disable echo
+    stty -echo || {
+        log_error "Failed to disable echo"
+        return 1
+    }
+    
+    echo -en "$prompt" >&2
+    
+    # Read password with timeout
+    if ! read -r password; then
+        echo >&2
+        log_error "Failed to read password"
+        return 1
+    fi
+    
+    echo >&2  # Add newline after password input
+    
+    # Validate password length
+    if [[ "$length_verified" == "true" || "$length_verified" == "1" ]]; then
+        if [[ ${#password} -lt $MIN_PASSWORD_LENGTH ]]; then
+            log_error "Password must be at least $MIN_PASSWORD_LENGTH characters long"
+            return 1
+        fi
+        
+        if [[ ${#password} -gt $MAX_PASSWORD_LENGTH ]]; then
+            log_error "Password exceeds maximum length of $MAX_PASSWORD_LENGTH characters"
+            return 1
+        fi
+    fi
+    
+    echo "$password"
+}
+
 # Get and verify master password
 get_verified_master_password() {
     local password
@@ -233,7 +346,7 @@ get_verified_master_password() {
     if [[ $credential_auth_pass == false || $profile_decrypt_pass == false ]]; then 
         echo '------------------------------------------------------------------------' >&2
     fi
-    
+
     if [ $credential_auth_pass = false ] && [ $profile_decrypt_pass = true ]; then
         # no profile and authentication credential are valid, then password is wrong
         if [[ $(execute_sql "SELECT COUNT(*) FROM profile_env_vars;" true) -eq 0 ]]; then
@@ -353,66 +466,7 @@ get_verified_master_password() {
     echo "$password"
 }
 
-# Store master password verification in database
-init_auth_credential() {
-    local password="$1"
-    
-    if [[ -z "$password" ]]; then
-        log_error "Password is required for creating authentication credential"
-        return 1
-    fi
-    
-    # Generate random salt (32 bytes, base64 encoded)
-    local salt
-    if ! salt=$(openssl rand -base64 32 2>/dev/null); then
-        log_error "Failed to generate random salt"
-        return 1
-    fi
-    
-    # Create SHA-256 hash of password + salt
-    local password_hash
-    if ! password_hash=$(echo -n "${password}${salt}" | openssl dgst -sha256 -binary | openssl base64 -A 2>/dev/null); then
-        log_error "Failed to create password hash"
-        return 1
-    fi
-    
-    # Create verification data (known plaintext for encryption test)
-    local verification_data="LAM_AUTH_VERIFICATION:${salt}:$(date -Iseconds)"
-    
-    # Encrypt verification data with master password
-    local encrypted_info
-    if ! encrypted_info=$(encrypt_data "$verification_data" "$password"); then
-        log_error "Failed to encrypt verification data"
-        return 1
-    fi
-    
-    # Create integrity checksum (SHA-256 of all components)
-    local checksum_input="${password_hash}|${encrypted_info}|${salt}"
-    local checksum
-    if ! checksum=$(echo -n "$checksum_input" | openssl dgst -sha256 -binary | openssl base64 -A 2>/dev/null); then
-        log_error "Failed to create integrity checksum"
-        return 1
-    fi
-        
-    # Store in database using proper SQL escaping for base64 data
-    local sql="
-        INSERT OR REPLACE INTO auth_verification (id, password_hash, encrypted_info, salt, checksum)
-        VALUES (
-            1, 
-            '$(echo "$password_hash" | sed "s/'/''/g")', 
-            '$(echo "$encrypted_info" | sed "s/'/''/g")', 
-            '$(echo "$salt" | sed "s/'/''/g")', 
-            '$(echo "$checksum" | sed "s/'/''/g")'
-        );
-    "
-    
-    if ! execute_sql "$sql"; then
-        log_error "Failed to store password verification in database"
-        return 1
-    fi
-    
-    return 0
-}
+# ----------------------------------- En/Decrypt -----------------------------------
 
 # Encrypt data using AES-256-CBC
 encrypt_data() {
@@ -447,6 +501,8 @@ decrypt_data() {
         return 1
     }
 }
+
+# ----------------------------------- Session Mangement -----------------------------------
 
 # Check if session is valid
 is_session_valid() {
@@ -514,54 +570,4 @@ create_session() {
     }
     
     return 0
-}
-
-# ================================ System User Authentication ================================
-
-# Authenticate user identity when master password is forgotten
-authenticate_system_user() {
-    local current_user
-    current_user=$(whoami)
-    
-    log_info "Authenticating user: ${PURPLE}$current_user${NC}"
-    
-    # Method 1: Try sudo authentication (most common)
-    if command -v sudo >/dev/null 2>&1; then        
-        if sudo -v 2>/dev/null; then
-            return 0
-        else
-            log_warning "Sudo authentication failed"
-        fi
-    fi
-    echo
-    
-    # Method 2: Try su authentication as fallback
-    if command -v su >/dev/null 2>&1; then
-        log_info "Attempting alternative authentication method..."
-        echo -e "Please enter the password of user ${PURPLE}$current_user${NC}:"
-        
-        # Use su to verify user credentials
-        if echo "exit 0" | su "$current_user" -c "exit 0" 2>/dev/null; then
-            return 0
-        else
-            log_warning "Alternative authentication failed"
-        fi
-    fi
-    echo
-    
-    # Method 3: File-based verification (create a file that requires user permissions)
-    log_info "Attempting file-based authentication verification..."
-    
-    local test_file="$CONFIG_DIR/.auth_test_$$"
-    touch "$test_file" 2>/dev/null
-    
-    # Verify the file was created by the current user
-    if [[ -f "$test_file" && -O "$test_file" ]]; then
-        rm -f "$test_file" 2>/dev/null
-        return 0
-    fi
-    echo 
-    
-    log_error "User authentication failed"
-    return 1
 }
