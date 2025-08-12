@@ -155,59 +155,33 @@ cmd_list() {
     fi
     
     echo
-    local profile_names
-    profile_names=$(get_profile_names)
     
-    while IFS= read -r profile_name; do
-        if [[ -n "$profile_name" ]]; then
-            local profile_json
-            profile_json=$(get_profile "$profile_name")
-            
-            if [[ "$profile_json" != "null" ]]; then
-                # Parse JSON manually (simple extraction)
-                local model_name description env_vars_json
-                model_name=$(echo "$profile_json" | grep -o '"model_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"model_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "Not specified")
-                description=$(echo "$profile_json" | grep -o '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "No description")
+    # Optimized: Single SQL query to get all profile data with environment variable keys
+    local profiles_data
+    profiles_data=$(execute_sql "
+        SELECT 
+            p.name,
+            p.model_name,
+            p.description,
+            GROUP_CONCAT(pev.key, ', ') as env_keys
+        FROM profiles p
+        LEFT JOIN profile_env_vars pev ON p.id = pev.profile_id
+        GROUP BY p.id, p.name, p.model_name, p.description
+        ORDER BY p.name;
+    " true)
                 
-                # Extract environment variable keys from env_vars section only
-                local env_vars_section env_keys
-                # First check if env_vars exists and is not empty
-                if echo "$profile_json" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{[[:space:]]*}'; then
-                    # Empty env_vars object
-                    env_keys="(none)"
-                elif echo "$profile_json" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{.*}'; then
-                    # Non-empty env_vars object
-                    env_vars_section=$(echo "$profile_json" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
-                    env_keys=""
-                    
-                    if [[ -n "$env_vars_section" ]]; then
-                        while read -r pair; do
-                            if [[ -n "$pair" ]]; then
-                                local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
-                                if [[ -n "$env_keys" ]]; then
-                                    env_keys="$env_keys, $key"
-                                else
-                                    env_keys="$key"
-                                fi
-                            fi
-                        done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
-                    fi
-                    
-                    if [[ -z "$env_keys" ]]; then
-                        env_keys="(none)"
-                    fi
-                else
-                    env_keys="(none)"
-                fi
-                
-                echo -e "${PURPLE}• Profile: $profile_name${NC}"
-                log_gray "  ├─ Model Name: $model_name"
-                log_gray "  ├─ Description: $description"
-                log_gray "  └─ Environment Variables: $env_keys"
-                echo
-            fi
-        fi
-    done <<< "$profile_names"
+    # Process all profiles in a single loop
+    while IFS='|' read -r profile_name model_name description env_keys; do
+        [[ -z "$model_name" || "$model_name" == "null" ]] && model_name="Not specified"
+        [[ -z "$description" || "$description" == "null" ]] && description="No description"
+        [[ -z "$env_keys" || "$env_keys" == "null" ]] && env_keys="(none)"
+        
+        echo -e "${PURPLE}• Profile: $profile_name${NC}"
+        log_gray "  ├─ Model Name: $model_name"
+        log_gray "  ├─ Description: $description"
+        log_gray "  └─ Environment Variables: $env_keys"
+        echo
+    done <<< "$profiles_data"
 
     log_info "💡 Get details for a profile: ${PURPLE}lam show <profile_name>${NC}"
     echo
