@@ -257,14 +257,15 @@ get_master_password() {
     fi
     
     # Disable echo and set up cleanup
-    local old_settings
-    old_settings=$(stty -g) || {
+    local old_settings=""
+    old_settings=$(stty -g 2>/dev/null) || {
         log_error "Failed to save terminal settings"
         return 1
     }
-    
-    # Set up trap to restore settings
-    trap 'stty "$old_settings" 2>/dev/null' RETURN
+
+    # Set up trap to restore settings on any exit (including Ctrl+C)
+    trap '[[ -n "${old_settings:-}" ]] && stty "$old_settings" 2>/dev/null || true; echo >&2; exit 130' INT TERM
+    trap '[[ -n "${old_settings:-}" ]] && stty "$old_settings" 2>/dev/null || true' RETURN EXIT
     
     # Disable echo
     stty -echo || {
@@ -325,7 +326,6 @@ get_verified_master_password() {
             credential_auth_pass=true
         else 
             credential_auth_pass=false
-            echo
         fi
         
         # Verify profile decryption
@@ -333,7 +333,6 @@ get_verified_master_password() {
             profile_decrypt_pass=true
         else 
             profile_decrypt_pass=false
-            echo
         fi
         
         # password is valid only when both checks passed
@@ -409,7 +408,7 @@ get_verified_master_password() {
             echo >&2
             echo 'Now, you have several options to handle this case:' >&2
             log_gray "1): try your master password again"
-            log_gray "2): remove all data(cause wrong) and reset LAM ${RED}(dangerous operation)${NC}"
+            log_gray "2): remove all data(because is wrong) and reset LAM ${RED}(dangerous operation)${NC}"
             
             local choice
             echo -n "Enter your choice (1/2): " >&2
