@@ -197,33 +197,20 @@ cmd_show() {
         return 1
     fi
     
-    # Check if profile exists
-    if ! profile_exists "$name"; then
-        log_error "Profile '$name' not found!"
-        log_info "Available profiles:"
-        get_profile_names | sed 's/^/• /'
-        exit 1
-    fi
-    
     local profile
     profile=$(get_profile "$name")
     
+    echo 
     echo -e "${BLUE}Profile Details${NC}"
     echo "===================="
     echo -e "${PURPLE}• Profile Name${NC}: $name"
     
-    # Parse profile JSON manually
     local model_name description created last_used
-    model_name=$(echo "$profile" | grep -o '"model_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"model_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "Not specified")
-    description=$(echo "$profile" | grep -o '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "No description")
-    created=$(echo "$profile" | grep -o '"created"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"created"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "Unknown")
-    last_used=$(echo "$profile" | grep -o '"last_used"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"last_used"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "Never")
-    
-    # Handle null values
-    if [[ "$last_used" == "null" || -z "$last_used" ]]; then
-        last_used="Never"
-    fi
-    
+    model_name=$(echo "$profile" | jq -r '.model_name // "Not specified"')
+    description=$(echo "$profile" | jq -r '.description // "No description"')
+    created=$(echo "$profile" | jq -r '.created // "Unknown"')
+    last_used=$(echo "$profile" | jq -r '.last_used // "Never"')
+        
     echo -e "${PURPLE}• Model Name${NC}: $model_name"
     echo -e "${PURPLE}• Description${NC}: $description"
     
@@ -232,53 +219,42 @@ cmd_show() {
     echo -e "${PURPLE}• Last Used${NC}: $last_used"
     
     echo 
-    # Show environment variables with masked values
     echo -e "${PURPLE}• Environment Variables${NC}:"
     
-    # Extract and display environment variables
-    # Check if env_vars exists and is not empty
-    if echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{[[:space:]]*}'; then
-        # Empty env_vars object
-        echo -e "  └─ ${GRAY}(no environment variables)${NC}"
-    elif echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{.*}'; then
-        # Non-empty env_vars object
-        local env_vars_section
-        env_vars_section=$(echo "$profile" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
-        
-        if [[ -n "$env_vars_section" ]]; then
-            local found_vars=false
-            while read -r pair; do
-                if [[ -n "$pair" ]]; then
-                    found_vars=true
-                    local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
-                    local value=$(echo "$pair" | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
-                    
-                    # Mask the value for security (show first 4 and last 4 characters)
-                    local masked_value
-                    if [[ ${#value} -gt 8 ]]; then
-                        masked_value="${value:0:4}...${value: -4}"
-                    else
-                        masked_value="***"
-                    fi
-                    
-                    echo -e "  └─ ${GREEN}$key${NC} = $masked_value"
-                fi
-            done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
+    local env_vars_keys
+    env_vars_keys=$(echo "$profile" | jq -r '.env_vars | keys[]?' 2>/dev/null)
+    
+    if [[ -n "$env_vars_keys" ]]; then
+        local has_vars=false
+        while IFS= read -r key; do
+            has_vars=true
+            local encrypted_value
+            encrypted_value=$(echo "$profile" | jq -r --arg k "$key" '.env_vars[$k]' 2>/dev/null)
             
-            if [[ "$found_vars" == false ]]; then
-                echo -e "  └─ ${GRAY}(no environment variables)${NC}"
+            if [[ -n "$encrypted_value" && "$encrypted_value" != "null" ]]; then
+                # Mask the encrypted value for security (show first 4 and last 4 characters)
+                local masked_value
+                if [[ ${#encrypted_value} -gt 8 ]]; then
+                    masked_value="${encrypted_value:0:4}...${encrypted_value: -4}"
+                else
+                    masked_value="******"
+                fi
+                
+                echo -e "  └─ ${GREEN}$key${NC} = $masked_value"
             fi
-        else
+        done <<< "$env_vars_keys"
+        
+        if [[ "$has_vars" == false ]]; then
             echo -e "  └─ ${GRAY}(no environment variables)${NC}"
         fi
     else
         echo -e "  └─ ${GRAY}(no environment variables)${NC}"
     fi
     
-    echo 
     echo '------------------------------------'
     log_gray "To use this profile: source <(lam use $name)"
     log_gray "To edit this profile: lam edit $name"
+    echo 
 }
 
 # Export profile to environment variables
