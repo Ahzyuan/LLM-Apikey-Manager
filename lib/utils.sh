@@ -54,7 +54,7 @@ cleanup_temp_resources() {
 }
 
 check_dependencies() {
-    local dependencies=("sqlite3" "openssl" "curl" "tar")
+    local dependencies=("sqlite3" "openssl" "curl" "tar" "jq")
     local missing_deps=()
     local dep
     
@@ -183,3 +183,72 @@ create_temp_file() {
     echo "$temp_file"
 }
 
+# Collect, validate and dump environment variable input to array 
+# Usage: collect_env_var "field_name" "prompt" "master_password" "env vars collector" "true"(required) "true"(mask_value) 
+# Returns: env vars collector json string or empty string
+collect_env_var() {
+    local field_name="$1"
+    local prompt="$2"
+    local master_password="$3"
+    local env_vars_json="$4"
+    local required="${5:-false}"  # required or optional
+    local mask_display="${6:-true}"  # mask_value or show_value
+
+    if [[ -z "$master_password" ]]; then
+        log_error "Master password is required to collect environment variables!"
+        return 1
+    fi
+     
+    if [[ -z "$env_vars_json" ]];then
+        log_error "Environment variables collector in json string is required!"
+        return 1
+    fi
+    
+    while true; do
+        echo -en "${PURPLE}$prompt${NC}: " >&2
+        local input
+        if ! read -r input; then
+            log_error "Failed to read input"
+            return 1
+        fi
+        
+        # Handle optional fields
+        if [[ $required == false && -z "$input" ]]; then
+            log_info "Skipped: $field_name"
+            echo ""
+            return 0 
+        elif [[ $required && -z "$input" ]]; then
+            log_error "$field_name is required!"
+            continue
+        fi
+        
+        # Validate and parse input
+        input=$(sanitize_input "$input")
+        if [[ ! "$input" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+$ ]]; then
+            log_error "Invalid input, Use KEY=VALUE format!"
+            continue
+        fi
+        
+        local key="${input%%=*}"
+        local value="${input#*=}"
+        
+        if validate_env_key "$key" && validate_env_value "$value"; then
+            local encrypted_value
+            if ! encrypted_value=$(encrypt_data "$value" "$master_password"); then
+                log_error "Failed to encrypt value for ${PURPLE}$key${NC}"
+                return 1
+            fi
+            
+            # dump to env_vars_json
+            echo "$env_vars_json" | jq --arg key "$key" --arg value "$encrypted_value" '.[$key] = $value'
+
+            if $mask_display;then
+                log_success "Added: $key = ******"
+            else
+                log_success "Added: $key = $value"
+            fi
+
+            return 0
+        fi
+    done
+}

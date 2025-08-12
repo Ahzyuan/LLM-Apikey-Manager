@@ -166,11 +166,11 @@ create_profile() {
     # Insert profile
     local profile_sql="
         INSERT INTO profiles (name, model_name, description, created_at)
-        VALUES ('$name', '$model_name', '$description', datetime('now'));
+        VALUES ('$name', '$model_name', '$description', datetime('now', 'localtime'));
     "
     
-    if ! execute_sql "$profile_sql"; then
-        log_error "Failed to create profile"
+    if ! execute_sql "$profile_sql" 2>/dev/null; then
+        log_error "Failed to dump profile to database"
         return 1
     fi
     
@@ -183,42 +183,40 @@ create_profile() {
         return 1
     fi
     
-    # Insert environment variables if provided
+    # Insert environment variables if any
     if [[ -n "$env_vars_json" && "$env_vars_json" != "{}" ]]; then
-        # Parse JSON and insert each key-value pair
-        # Note: We'll implement a simple parser since we no longer have jq
-        local temp_file
-        if ! temp_file=$(create_temp_file); then
+        local keys values
+        
+        if ! keys=$(echo "$env_vars_json" | jq -r 'keys[]' 2>/dev/null); then
+            log_error "Failed to parse environment variables JSON"
             return 1
         fi
         
-        echo "$env_vars_json" > "$temp_file"
-        
-        # Extract key-value pairs (simple JSON parsing)
-        while IFS=':' read -r key value; do
-            if [[ -n "$key" && -n "$value" ]]; then
-                # Clean up the key and value
-                key=$(echo "$key" | xargs)
-                value=$(echo "$value" | xargs)
+        while IFS= read -r key; do
+            if [[ -n "$key" ]]; then
+                local value
+                if ! value=$(echo "$env_vars_json" | jq -r --arg k "$key" '.[$k]' 2>/dev/null); then
+                    log_error "Failed to extract value for key: $key"
+                    return 1
+                fi
                 
-                if [[ -n "$key" && -n "$value" ]]; then
-                    # Escape single quotes
-                    key=$(printf '%s' "$key" | sed "s/'/''/g")
-                    value=$(printf '%s' "$value" | sed "s/'/''/g")
+                # Escape single quotes for SQL
+                local escaped_key escaped_value
+                escaped_key=$(printf '%s' "$key" | sed "s/'/''/g")
+                escaped_value=$(printf '%s' "$value" | sed "s/'/''/g")
                     
                     local env_sql="
                         INSERT INTO profile_env_vars (profile_id, key, value)
-                        VALUES ($profile_id, '$key', '$value');
+                    VALUES ($profile_id, '$escaped_key', '$escaped_value');
                     "
                     
-                    if ! execute_sql "$env_sql"; then
-                        log_warning "Failed to insert environment variable: $key"
-                    fi
+                if ! execute_sql "$env_sql" 2>/dev/null; then
+                    log_error "Failed to insert environment variable: $key"
+                    return 1
                 fi
             fi
-        done < <(echo "$env_vars_json" | sed 's/[{}"]//g' | tr ',' '\n' | grep ':')
+        done <<< "$keys"
     fi
-    
     return 0
 }
 
@@ -228,6 +226,11 @@ get_profile() {
     
     if [[ -z "$name" ]]; then
         log_error "Profile name is required"
+        return 1
+    fi
+
+    if ! profile_exists "$name"; then
+        log_error "Profile '$name' does not exist"
         return 1
     fi
     
@@ -242,16 +245,9 @@ get_profile() {
         WHERE name = '$name';
     " true)
     
-    if [[ -z "$profile_data" ]]; then
-        echo "null"
-        return 1
-    fi
-    
-    # Parse profile data
     local id model_name description created_at last_used updated_at
     IFS='|' read -r id model_name description created_at last_used updated_at <<< "$profile_data"
     
-    # Get environment variables
     local env_vars_data
     env_vars_data=$(execute_sql "
         SELECT key, value
@@ -259,38 +255,32 @@ get_profile() {
         WHERE profile_id = $id;
     " true)
     
-    # Build JSON response (manual construction since no jq)
-    local env_vars_json='{'
-    local first=true
-    
-    while IFS='|' read -r key value; do
-        if [[ -n "$key" ]]; then
-            if [[ "$first" == true ]]; then
-                first=false
-            else
-                env_vars_json+=','
+    local env_vars_json='{}'
+    if [[ -n "$env_vars_data" ]]; then
+        while IFS='|' read -r key value; do
+            if [[ -n "$key" ]]; then
+                env_vars_json=$(echo "$env_vars_json" | jq --arg k "$key" --arg v "$value" '.[$k] = $v')
             fi
-            env_vars_json+="\"$key\":\"$value\""
-        fi
-    done <<< "$env_vars_data"
-    
-    env_vars_json+='}'
-    
-    # Construct final JSON
-    local last_used_json="null"
-    if [[ -n "$last_used" && "$last_used" != "" ]]; then
-        last_used_json="\"$last_used\""
+        done <<< "$env_vars_data"
     fi
     
-    cat << EOF
-{
-    "env_vars": $env_vars_json,
-    "model_name": "$model_name",
-    "description": "$description",
-    "created": "$created_at",
-    "last_used": $last_used_json
-}
-EOF
+    local profile_json
+    profile_json=$(jq -n \
+        --arg model_name "$model_name" \
+        --arg description "$description" \
+        --arg created "$created_at" \
+        --arg last_used "${last_used:-}" \
+        --argjson env_vars "$env_vars_json" \
+        '{
+            env_vars: $env_vars,
+            model_name: $model_name,
+            description: $description,
+            created: $created,
+            last_used: (if $last_used == "" then null else $last_used end)
+        }'
+    )
+    
+    echo "$profile_json"
 }
 
 # Get all profiles (returns JSON array for compatibility)
@@ -307,28 +297,29 @@ get_all_profiles() {
         return 0
     fi
     
-    # Build JSON array
-    local json_array='['
-    local first=true
+    # Build JSON array using jq
+    local json_array='[]'
     
     while IFS='|' read -r name model_name description created_at last_used; do
         if [[ -n "$name" ]]; then
-            if [[ "$first" == true ]]; then
-                first=false
-            else
-                json_array+=','
-            fi
-            
-            local last_used_json="null"
-            if [[ -n "$last_used" && "$last_used" != "" ]]; then
-                last_used_json="\"$last_used\""
-            fi
-            
-            json_array+="{\"name\":\"$name\",\"model_name\":\"$model_name\",\"description\":\"$description\",\"created\":\"$created_at\",\"last_used\":$last_used_json}"
+            # Add profile object to array using jq
+            json_array=$(echo "$json_array" | jq \
+                --arg name "$name" \
+                --arg model_name "$model_name" \
+                --arg description "$description" \
+                --arg created "$created_at" \
+                --arg last_used "${last_used:-}" \
+                '. += [{
+                    name: $name,
+                    model_name: $model_name,
+                    description: $description,
+                    created: $created,
+                    last_used: (if $last_used == "" then null else $last_used end)
+                }]'
+            )
         fi
     done <<< "$profiles_data"
     
-    json_array+=']'
     echo "$json_array"
 }
 
@@ -442,7 +433,7 @@ update_profile_last_used() {
     execute_sql "$sql"
 }
 
-# Delete profile
+# Delete profile and all related data
 delete_profile() {
     local name="$1"
     
@@ -456,12 +447,44 @@ delete_profile() {
         return 1
     fi
     
-    name=$(printf '%s' "$name" | sed "s/'/''/g")
+    # Escape single quotes for SQL
+    local escaped_name
+    escaped_name=$(printf '%s' "$name" | sed "s/'/''/g")
     
-    # Delete profile (cascade will handle env vars)
-    local sql="DELETE FROM profiles WHERE name = '$name';"
+    # Get profile ID for detailed cleanup
+    local profile_id
+    profile_id=$(execute_sql "SELECT id FROM profiles WHERE name = '$escaped_name';" true 2>/dev/null)
     
-    execute_sql "$sql"
+    if [[ -n "$profile_id" ]]; then
+        # Count environment variables before deletion
+        local env_var_count
+        env_var_count=$(execute_sql "SELECT COUNT(*) FROM profile_env_vars WHERE profile_id = $profile_id;" true 2>/dev/null)
+        
+        # Delete profile and related data in a transaction
+        local delete_sql="
+            BEGIN TRANSACTION;
+            
+            -- Delete environment variables first (explicit cleanup)
+            DELETE FROM profile_env_vars WHERE profile_id = $profile_id;
+            
+            -- Delete the profile itself
+            DELETE FROM profiles WHERE id = $profile_id;
+            
+            COMMIT;
+        "
+        
+        if ! execute_sql "$delete_sql" 2>/dev/null; then
+            log_error "Failed to delete profile '$name'"
+            return 1
+        fi
+        
+        log_success "Profile ${PURPLE}'$name'${NC} deleted successfully"
+    else
+        log_error "Failed to get profile ID for '$name'"
+        return 1
+    fi
+    
+    return 0
 }
 
 clear_all_profiles() {

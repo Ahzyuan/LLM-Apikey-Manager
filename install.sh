@@ -29,7 +29,7 @@ log_error() {
 
 
 check_dependencies() {
-    local deps=("sqlite3" "openssl" "curl" "tar")
+    local deps=("sqlite3" "openssl" "curl" "tar" "jq")
     local missing_deps=()
 
     log_info "Checking dependencies..."

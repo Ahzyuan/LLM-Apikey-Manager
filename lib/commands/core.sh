@@ -6,20 +6,28 @@
 # Add new API profile with enhanced validation
 cmd_add() {
     local name="$1"
+    local env_vars="{}"
+    local temp_collector description
     
+    # profile name verification
     if [[ -z "$name" ]]; then
         log_error "Profile name is required!"
         echo "Usage: lam add <profile_name>"
         return 1
     fi
     
-    # Validate profile name
-    if ! validate_env_key "$name"; then
+    if ! validate_env_key "$name" 2>/dev/null; then
         log_error "Invalid profile name format"
+        log_info "Profile name must start with a letter or underscore, and contain only alphanumeric and underscore characters."
+        return 1
+    fi
+
+    # auth verification
+    local master_password
+    if ! master_password=$(get_verified_master_password); then
         return 1
     fi
     
-    # Check if profile already exists
     if profile_exists "$name"; then
         log_warning "Profile '$name' already exists!"
         echo -en "${RED}Do you want to overwrite it? (y/N): ${NC}"
@@ -29,19 +37,24 @@ cmd_add() {
             return 1
         fi
         
-        if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        if [[ $confirm != [Yy] ]]; then
             log_info "Operation cancelled."
             return 0
         fi
+        
+        if ! delete_profile "$name"; then
+            log_error "Failed to remove existing profile"
+            return 1
+        fi
     fi
     
-    log_info "Adding new API profile: $name"
-    echo
+    log_info "Adding new profile: $name"
+    echo '----------------------------------------------------'
     
-    # Collect Model Name (required)
+    # Collect Model Name
     local model_name
     while true; do
-        echo -en "${PURPLE}Model Name${NC} (required, e.g., gpt-4, claude-3-sonnet): "
+        echo -en "${PURPLE}Model Name (required, e.g., gpt-4)${NC}: "
         if ! read -r model_name; then
             log_error "Failed to read model name"
             return 1
@@ -63,115 +76,52 @@ cmd_add() {
     log_success "Model: $model_name"
     echo
     
-    # Initialize empty env_vars object
-    local env_vars='{}'
-    
     # Collect API Key
-    local api_key_input api_key_name api_key_value
-    while true; do
-        echo -en "${PURPLE}API Key${NC} (e.g., OPENAI_API_KEY=sk-123): "
-        if ! read -r api_key_input; then
-            log_error "Failed to read API key"
-            return 1
-        fi
-        
-        # Validate and parse API key input
-        api_key_input=$(sanitize_input "$api_key_input")
-        if [[ ! "$api_key_input" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+$ ]]; then
-            log_error "Invalid format! Use KEY=VALUE (e.g., OPENAI_API_KEY=sk-123...)"
-            continue
-        fi
-        
-        api_key_name="${api_key_input%%=*}"
-        api_key_value="${api_key_input#*=}"
-        
-        if ! validate_env_key "$api_key_name" || ! validate_env_value "$api_key_value"; then
-            continue
-        fi
-        
-        break
-    done
-    
-    # Build env_vars JSON manually (since no jq)
-    if [[ "$env_vars" == "{}" ]]; then
-        env_vars="{\"$api_key_name\":\"$api_key_value\"}"
+    if temp_collector=$(
+        collect_env_var "API Key" "API Key (e.g., OPENAI_API_KEY=sk-123)" \
+        "$master_password" "$env_vars" \
+        true true
+    );then
+        env_vars="$temp_collector"
     else
-        env_vars="${env_vars%?},\"$api_key_name\":\"$api_key_value\"}"
+        return 1
     fi
-    log_success "Added: $api_key_name=***"
     echo
     
-    # Collect Base URL (optional)
-    local base_url_input
-    while true; do
-        echo -en "${PURPLE}Base URL${NC} (optional, e.g., OPENAI_BASE_URL=https://api.openai.com/v1): "
-        if ! read -r base_url_input; then
-            log_error "Failed to read base URL"
-            return 1
+    # Collect Base URL
+    if temp_collector=$(
+        collect_env_var "Base URL" "Base URL (optional, e.g., OPENAI_BASE_URL=https://api.openai.com/v1)" \
+        "$master_password" "$env_vars" \
+        false false
+    );then
+        if [[ -n "$temp_collector" ]];then
+            env_vars="$temp_collector"
         fi
-        
-        if [[ -z "$base_url_input" ]]; then
-            log_info "Base URL: (skipped)"
-            break
-        fi
-        
-        base_url_input=$(sanitize_input "$base_url_input")
-        if [[ ! "$base_url_input" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+$ ]]; then
-            log_error "Invalid format! Use KEY=VALUE (e.g., OPENAI_BASE_URL=https://api.openai.com/v1)"
-            continue
-        fi
-        
-        local base_url_name="${base_url_input%%=*}"
-        local base_url_value="${base_url_input#*=}"
-        
-        if ! validate_env_key "$base_url_name" || ! validate_env_value "$base_url_value"; then
-            continue
-        fi
-        
-        # Add to env_vars JSON manually
-        env_vars="${env_vars%?},\"$base_url_name\":\"$base_url_value\"}"
-        log_success "Added: $base_url_name=$base_url_value"
-        break
-    done
+    else
+        return 1
+    fi
     echo
     
     # Collect additional environment variables
     while true; do
-        echo -en "${PURPLE}Additional ENV${NC} (KEY=VALUE format, or press Enter to finish): "
-        local additional_env
-        if ! read -r additional_env; then
-            log_error "Failed to read additional environment variable"
+        if temp_collector=$(
+            collect_env_var "Additional ENV" "Additional ENV (KEY=VALUE format, or press Enter to finish)" \
+            "$master_password" "$env_vars" \
+            false true
+        );then
+            if [[ -n "$temp_collector" ]];then
+                env_vars="$temp_collector"
+            else
+                break
+            fi
+        else
             return 1
         fi
-        
-        # If empty, break the loop
-        if [[ -z "$additional_env" ]]; then
-            log_info "No additional environment variables added."
-            break
-        fi
-        
-        additional_env=$(sanitize_input "$additional_env")
-        if [[ ! "$additional_env" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+$ ]]; then
-            log_error "Invalid format! Use KEY=VALUE"
-            continue
-        fi
-        
-        local env_name="${additional_env%%=*}"
-        local env_value="${additional_env#*=}"
-        
-        if ! validate_env_key "$env_name" || ! validate_env_value "$env_value"; then
-            continue
-        fi
-        
-        # Add to env_vars JSON manually
-        env_vars="${env_vars%?},\"$env_name\":\"$env_value\"}"
-        log_success "Added: $env_name"
     done
     echo
     
-    # Collect description (optional)
-    echo -en "${PURPLE}Description${NC} (optional): "
-    local description
+    # Collect description
+    echo -en "${PURPLE}Description (optional)${NC}: "
     if ! read -r description; then
         log_error "Failed to read description"
         return 1
@@ -184,17 +134,12 @@ cmd_add() {
     log_success "Description: $description"
     echo
     
-    # Close the env_vars JSON object
-    env_vars="$env_vars}"
-    
-    # Create profile in SQLite database
+    # create profile 
     if ! create_profile "$name" "$model_name" "$description" "$env_vars"; then
-        log_error "Failed to create profile"
         return 1
     fi
     
     log_success "Profile '$name' added successfully!"
-    echo
     log_info "💡 To use this profile, run: source <(lam use $name)"
 }
 
