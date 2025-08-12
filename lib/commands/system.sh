@@ -78,7 +78,7 @@ cmd_init() {
             log_info "Now you can set a new master password for your profiles."
             log_info "Changing master password ${PURPLE}won't${NC} affect your existing profiles!"
             log_info "After the change is completed, the old password will be replaced by the new one and become invalid!"
-            echo -en "${BLUE}Do you want to change your master password?${NC} (y/N): "
+            echo -en "${PURPLE}Do you want to change your master password?${NC} (y/N): "
             local change_confirm
             if ! read -r change_confirm; then
                 log_error "Failed to read confirmation"
@@ -86,7 +86,8 @@ cmd_init() {
             fi
 
             if [[ "${change_confirm,,}" == "y" ]]; then
-                renew_master_password
+                renew_master_password "$old_password"
+                return $?
             else
                 echo 
                 log_info "Nothing remains to do. Exiting..."

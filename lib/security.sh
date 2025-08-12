@@ -571,3 +571,285 @@ create_session() {
     
     return 0
 }
+
+# ------------------------------------ Renew Password -----------------------------------
+
+reencrypt_profile() { 
+    local profile_name="$1"
+    local old_password="$2"
+    local new_password="$3"
+
+    if [[ -z "$profile_name" ]]; then
+        log_error "Profile name is required"
+        return 1
+    fi
+
+    profile_name="$(printf '%s' "$profile_name" | sed "s/'/''/g")"
+
+    # Get profile ID
+    local profile_id
+    profile_id=$(
+        execute_sql "SELECT id FROM profiles WHERE name = '$profile_name';" true
+    ) 2>/dev/null
+    
+    if [[ -z "$profile_id" ]]; then
+        log_warning "Failed to get profile ID for profile ${PURPLE}'$profile_name'${NC}"
+        return 1
+    fi
+    
+    # Get all environment variables for this profile
+    local env_vars_data
+    env_vars_data=$(execute_sql "
+        SELECT key, value
+        FROM profile_env_vars 
+        WHERE profile_id = $profile_id;
+    " true)
+    
+    if [[ -z "$env_vars_data" ]]; then
+        log_info "No environment variables found for profile ${PURPLE}'$profile_name'${NC}. Skipping..."
+        return 0
+    fi
+
+    # Process each environment variable
+    while IFS='|' read -r key encrypted_value; do
+        if [[ -n "$key" && -n "$encrypted_value" ]]; then
+            # Skip base URL variables (they are not encrypted)
+            if [[ "$key" =~ .*[Bb][Aa][Ss][Ee].*[Uu][Rr][Ll].* ]]; then
+                continue
+            fi
+            
+            # Decrypt with old password
+            local decrypted_value
+            if ! decrypted_value=$(decrypt_data "$encrypted_value" "$old_password" 2>/dev/null); then
+                log_error "Failed to decrypt ${PURPLE}'$key'${NC} with old password in profile ${PURPLE}'$profile_name'${NC}"
+                return 1
+            fi
+            
+            # Re-encrypt with new password
+            local new_encrypted_value
+            if ! new_encrypted_value=$(encrypt_data "$decrypted_value" "$new_password" 2>/dev/null); then
+                log_error "Failed to re-encrypt ${PURPLE}'$key'${NC} in profile ${PURPLE}'$profile_name'${NC}"
+                return 1
+            fi
+            
+            # Update in database
+            local escaped_key escaped_value
+            escaped_key=$(printf '%s' "$key" | sed "s/'/''/g")
+            escaped_value=$(printf '%s' "$new_encrypted_value" | sed "s/'/''/g")
+            
+            local update_sql="
+                UPDATE profile_env_vars 
+                SET value = '$escaped_value'
+                WHERE profile_id = $profile_id AND key = '$escaped_key';
+            "
+            
+            if ! execute_sql "$update_sql" 2>/dev/null; then
+                log_error "Failed to update ${PURPLE}'$key'${NC} in profile ${PURPLE}'$profile_name'${NC}"
+                return 1
+            fi
+        fi
+    done <<< "$env_vars_data"
+}
+
+reencrypt_backup() {
+    local backup_file="$1"
+    local old_password="$2"
+    local new_password="$3"
+
+    local backup_name
+    backup_name=$(basename "$backup_file")
+    
+    # Create temporary directory for backup processing
+    local temp_backup_dir
+    if ! temp_backup_dir=$(mktemp -d); then
+        log_error "Failed to create temp directory for backup: $backup_name"
+        return 1
+    fi
+    TEMP_DIRS+=("$temp_backup_dir")
+    
+    # Extract backup
+    if ! tar -xzf "$backup_file" -C "$temp_backup_dir" 2>/dev/null; then
+        log_error "Failed to extract backup: $backup_name"
+        return 1
+    fi
+    
+    local backup_db_file="$temp_backup_dir/lam-config/profiles.db"
+    if [[ ! -f "$backup_db_file" ]]; then
+        log_info "No database found in backup: $backup_name. Skipping..."
+        return 1
+    fi
+    
+    # Process environment variables in backup database
+    local backup_env_vars
+    backup_env_vars=$(sqlite3 "$backup_db_file" "
+        SELECT p.name, pev.key, pev.value, pev.id
+        FROM profiles p 
+        JOIN profile_env_vars pev ON p.id = pev.profile_id;
+    " 2>/dev/null)
+    
+    if [[ -n "$backup_env_vars" ]]; then
+        local backup_vars_updated=0
+        
+        while IFS='|' read -r profile_name key encrypted_value env_var_id; do
+            if [[ -n "$key" && -n "$encrypted_value" ]]; then
+                # Skip base URL variables
+                if [[ "$key" =~ .*[Bb][Aa][Ss][Ee].*[Uu][Rr][Ll].* ]]; then
+                    continue
+                fi
+                
+                # Decrypt with old password
+                local decrypted_value
+                if ! decrypted_value=$(decrypt_data "$encrypted_value" "$old_password" 2>/dev/null); then
+                    log_error "Failed to decrypt $key in backup $backup_name"
+                    return 1
+                fi
+                
+                # Re-encrypt with new password
+                local new_encrypted_value
+                if ! new_encrypted_value=$(encrypt_data "$decrypted_value" "$new_password" 2>/dev/null); then
+                    log_error "Failed to re-encrypt $key in backup $backup_name"
+                    return 1
+                fi
+                
+                # Update in backup database
+                local escaped_value
+                escaped_value=$(printf '%s' "$new_encrypted_value" | sed "s/'/''/g")
+                
+                if ! sqlite3 "$backup_db_file" "
+                    UPDATE profile_env_vars 
+                    SET value = '$escaped_value'
+                    WHERE id = $env_var_id;
+                " 2>/dev/null; then
+                    log_error "Failed to update $key in backup $backup_name"
+                    return 1
+                fi
+                
+                ((backup_vars_updated++))
+            fi
+        done <<< "$backup_env_vars"
+        
+        if [[ $backup_vars_updated -gt 0 ]]; then
+            if ! tar -czf "$backup_file" -C "$temp_backup_dir" "lam-config" 2>/dev/null; then
+                log_error "Failed to update backup archive: $backup_name"
+                return 1
+            fi
+        else
+            log_info "No encrypted variables found in backup: $backup_name. Skipping..."
+        fi
+    else
+        log_info "No environment variables found in backup: $backup_name. Skipping..."
+    fi
+}
+
+# Renew master password while preserving all encrypted data
+renew_master_password() {
+    local old_password="$1"
+    
+    if [[ -z "$old_password" ]]; then
+        log_error "Current password is required for password renewal"
+        return 1
+    fi
+        
+    # Get new password
+    local new_password confirm_password
+    if ! new_password=$(get_master_password "Enter new master password: " true); then
+        log_error "Failed to get new master password"
+        return 1
+    fi
+    
+    if ! confirm_password=$(get_master_password "Confirm new master password: "); then
+        log_error "Failed to confirm new master password"
+        return 1
+    fi
+    
+    if [[ "$new_password" != "$confirm_password" ]]; then
+        log_error "Passwords do not match!"
+        return 1
+    fi
+    
+    if [[ "$old_password" == "$new_password" ]]; then
+        log_info "New password is the same as the old one! Operation cancelled."
+        return 0
+    fi
+    echo
+        
+    # Step 2: Re-encrypt all environment variables in profiles
+    local profile_names
+    profile_names=$(get_profile_names)
+
+    log_info "Re-encrypting profiles..."
+    
+    if [[ -z "$profile_names" ]]; then
+        log_info "No profiles need to re-encrypted"
+    else
+        local all_profile_reencrypted=true
+        while IFS= read -r profile_name; do
+            if ! reencrypt_profile "$profile_name" "$old_password" "$new_password";then
+                all_profile_reencrypted=false
+                continue
+            fi
+        done <<< "$profile_names"
+        
+        if $all_profile_reencrypted; then
+            log_success "Re-encrypt profiles successfully"
+        else
+            log_warning "During the re-encrypt process, some profiles had errors shown above."
+            log_warning "These profiles might be broken and can not be used any more. Consider deleting them by ${PURPLE}lam edit${NC}."
+        fi
+        echo '------------------------------------------------------------'
+        echo
+    fi
+    
+    # Step 3: Re-encrypt environment variables in all backup files
+    log_info "Re-encrypting backup files..."
+
+    if [[ -d "$BACKUP_DIR" ]]; then
+        local backup_files=()
+        for file in "$BACKUP_DIR"/*.tar.gz; do
+            if [[ -f "$file" ]]; then
+                backup_files+=("$file")
+            fi
+        done
+        
+        if [[ ${#backup_files[@]} -gt 0 ]]; then
+            local all_backup_reencrypted=true
+            for backup_file in "${backup_files[@]}"; do
+                if ! reencrypt_backup "$backup_file" "$old_password" "$new_password"; then
+                    all_backup_reencrypted=false
+                    continue
+                fi
+            done
+            
+            if $all_backup_reencrypted; then
+                log_success "Re-encrypt backups successfully"
+            else
+                log_warning "During the re-encrypt process, some backups had errors shown above."
+                log_warning "These backups might be broken and can not be used any more. Consider deleting them by ${PURPLE}lam backup delete${NC}."
+            fi
+        else
+            log_info "No backup files found. Skipping..."
+        fi
+    else
+        log_info "No backup directory found. Skipping..."
+    fi
+    echo '------------------------------------------------------------'
+    echo
+    
+    if [[ $all_backup_reencrypted == false && $all_profile_reencrypted == false ]]; then
+        log_error "Password renewal failed."
+        return 1
+    fi
+
+    # Step 4: Update authentication credential with new password
+    init_auth_credential "$new_password" || return 1
+
+    log_success "Master password renewal completed successfully!"
+    log_success "Your new master password is now active and the old password is no longer valid"
+
+    # Create a new session with the new password
+    if ! create_session "$new_password"; then
+        log_warning "Password renewal completed, but failed to create new session"
+    fi
+    
+    return 0
+}
