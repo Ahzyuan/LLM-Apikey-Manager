@@ -46,6 +46,7 @@ init_database() {
             profile_id INTEGER NOT NULL,
             key TEXT NOT NULL,
             value TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'other' CHECK (type IN ('api_key', 'base_url', 'other')),
             FOREIGN KEY (profile_id) REFERENCES profiles (id) ON DELETE CASCADE,
             UNIQUE (profile_id, key)
         );
@@ -194,8 +195,11 @@ create_profile() {
         
         while IFS= read -r key; do
             if [[ -n "$key" ]]; then
-                local value
-                if ! value=$(echo "$env_vars_json" | jq -r --arg k "$key" '.[$k]' 2>/dev/null); then
+                local value env_type
+                env_type=$(echo "$env_vars_json" | jq -r --arg k "$key" '.[$k].type // "other"')
+                value=$(echo "$env_vars_json" | jq -r --arg k "$key" '.[$k].value')
+                
+                if [[ -z "$value" || "$value" == "null" ]]; then
                     log_error "Failed to extract value for key: $key"
                     return 1
                 fi
@@ -204,14 +208,14 @@ create_profile() {
                 local escaped_key escaped_value
                 escaped_key=$(printf '%s' "$key" | sed "s/'/''/g")
                 escaped_value=$(printf '%s' "$value" | sed "s/'/''/g")
-                    
-                    local env_sql="
-                        INSERT INTO profile_env_vars (profile_id, key, value)
-                    VALUES ($profile_id, '$escaped_key', '$escaped_value');
-                    "
-                    
+                
+                local env_sql="
+                    INSERT INTO profile_env_vars (profile_id, key, value, type)
+                    VALUES ($profile_id, '$escaped_key', '$escaped_value', '$env_type');
+                "
+                
                 if ! execute_sql "$env_sql" 2>/dev/null; then
-                    log_error "Failed to insert environment variable: $key"
+                    log_error "Failed to store environment variable: $key"
                     return 1
                 fi
             fi
@@ -250,16 +254,16 @@ get_profile() {
     
     local env_vars_data
     env_vars_data=$(execute_sql "
-        SELECT key, value
+        SELECT key, value, type
         FROM profile_env_vars 
         WHERE profile_id = $id;
     " true)
     
     local env_vars_json='{}'
     if [[ -n "$env_vars_data" ]]; then
-        while IFS='|' read -r key value; do
+        while IFS='|' read -r key value type; do
             if [[ -n "$key" ]]; then
-                env_vars_json=$(echo "$env_vars_json" | jq --arg k "$key" --arg v "$value" '.[$k] = $v')
+                env_vars_json=$(echo "$env_vars_json" | jq --arg k "$key" --arg v "$value" --arg t "${type:-other}" '.[$k] = {value: $v, type: $t}')
             fi
         done <<< "$env_vars_data"
     fi
@@ -387,26 +391,40 @@ update_profile() {
         # Clear existing environment variables
         execute_sql "DELETE FROM profile_env_vars WHERE profile_id = $profile_id;"
         
-        # Insert new environment variables
+        # Insert new environment variables using jq
         if [[ "$env_vars_json" != "{}" ]]; then
-            while IFS=':' read -r key value; do
-                if [[ -n "$key" && -n "$value" ]]; then
-                    key=$(echo "$key" | xargs)
-                    value=$(echo "$value" | xargs)
-                    
-                    if [[ -n "$key" && -n "$value" ]]; then
-                        key=$(printf '%s' "$key" | sed "s/'/''/g")
-                        value=$(printf '%s' "$value" | sed "s/'/''/g")
-                        
-                        local env_sql="
-                            INSERT INTO profile_env_vars (profile_id, key, value)
-                            VALUES ($profile_id, '$key', '$value');
-                        "
-                        
-                        execute_sql "$env_sql"
-                    fi
+            local keys
+            if ! keys=$(echo "$env_vars_json" | jq -r 'keys[]' 2>/dev/null); then
+                log_error "Failed to parse environment variables JSON in update"
+                return 1
+            fi
+            
+            while IFS= read -r key; do
+                # Extract value and type from new JSON structure
+                local value env_type
+                env_type=$(echo "$env_vars_json" | jq -r --arg k "$key" '.[$k].type // "other"')
+                value=$(echo "$env_vars_json" | jq -r --arg k "$key" '.[$k].value')
+                
+                if [[ -z "$value" || "$value" == "null" ]]; then
+                    log_warning "Failed to extract value for key: ${PURPLE}$key${NC}"
+                    continue
                 fi
-            done < <(echo "$env_vars_json" | sed 's/[{}"]//g' | tr ',' '\n' | grep ':')
+                
+                # Escape single quotes for SQL
+                local escaped_key escaped_value
+                escaped_key=$(printf '%s' "$key" | sed "s/'/''/g")
+                escaped_value=$(printf '%s' "$value" | sed "s/'/''/g")
+                
+                local env_sql="
+                    INSERT INTO profile_env_vars (profile_id, key, value, type)
+                    VALUES ($profile_id, '$escaped_key', '$escaped_value', '$env_type');
+                "
+                
+                if ! execute_sql "$env_sql" 2>/dev/null; then
+                    log_error "Failed to update environment variable: $key"
+                    return 1
+                fi
+            done <<< "$keys"
         fi
     fi
     
@@ -446,7 +464,7 @@ delete_profile() {
         log_error "Profile '$name' does not exist"
         return 1
     fi
-    
+        
     # Escape single quotes for SQL
     local escaped_name
     escaped_name=$(printf '%s' "$name" | sed "s/'/''/g")

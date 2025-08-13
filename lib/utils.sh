@@ -184,7 +184,7 @@ create_temp_file() {
 }
 
 # Collect, validate and dump environment variable input to array 
-# Usage: collect_env_var "field_name" "prompt" "master_password" "env vars collector" "true"(required) "true"(mask_value) 
+# Usage: collect_env_var "field_name" "prompt" "master_password" "env vars collector" "true"(required) "true"(mask_value) "type"
 # Returns: env vars collector json string or empty string
 collect_env_var() {
     local field_name="$1"
@@ -193,6 +193,7 @@ collect_env_var() {
     local env_vars_json="$4"
     local required="${5:-false}"  # required or optional
     local mask_display="${6:-true}"  # mask_value or show_value
+    local env_type="${7:-other}"  # environment variable type: api_key, base_url, other
 
     if [[ -z "$master_password" ]]; then
         log_error "Master password is required to collect environment variables!"
@@ -239,8 +240,12 @@ collect_env_var() {
                 return 1
             fi
             
-            # dump to env_vars_json
-            echo "$env_vars_json" | jq --arg key "$key" --arg value "$encrypted_value" '.[$key] = $value'
+            # dump to env_vars_json with type information
+            echo "$env_vars_json" | jq \
+                --arg key "$key" \
+                --arg value "$encrypted_value" \
+                --arg type "$env_type" \
+                '.[$key] = {value: $value, type: $type}'
 
             if $mask_display;then
                 log_success "Added: $key = ******"

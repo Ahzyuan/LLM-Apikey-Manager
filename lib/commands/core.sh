@@ -80,21 +80,21 @@ cmd_add() {
     if temp_collector=$(
         collect_env_var "API Key" "API Key (e.g., OPENAI_API_KEY=sk-123)" \
         "$master_password" "$env_vars" \
-        true true
-    );then
+        true true "api_key"
+    ); then
         env_vars="$temp_collector"
     else
         return 1
     fi
     echo
     
-    # Collect Base URL
+    # Collect Base URL (optional)
     if temp_collector=$(
         collect_env_var "Base URL" "Base URL (optional, e.g., OPENAI_BASE_URL=https://api.openai.com/v1)" \
         "$master_password" "$env_vars" \
-        false false
-    );then
-        if [[ -n "$temp_collector" ]];then
+        false false "base_url"
+    ); then
+        if [[ -n "$temp_collector" ]]; then
             env_vars="$temp_collector"
         fi
     else
@@ -107,9 +107,9 @@ cmd_add() {
         if temp_collector=$(
             collect_env_var "Additional ENV" "Additional ENV (KEY=VALUE format, or press Enter to finish)" \
             "$master_password" "$env_vars" \
-            false true
-        );then
-            if [[ -n "$temp_collector" ]];then
+            false true "other"
+        ); then
+            if [[ -n "$temp_collector" ]]; then
                 env_vars="$temp_collector"
             else
                 break
@@ -229,7 +229,7 @@ cmd_show() {
         while IFS= read -r key; do
             has_vars=true
             local encrypted_value
-            encrypted_value=$(echo "$profile" | jq -r --arg k "$key" '.env_vars[$k]' 2>/dev/null)
+            encrypted_value=$(echo "$profile" | jq -r --arg k "$key" '.env_vars[$k].value' 2>/dev/null)
             
             if [[ -n "$encrypted_value" && "$encrypted_value" != "null" ]]; then
                 # Mask the encrypted value for security (show first 4 and last 4 characters)
