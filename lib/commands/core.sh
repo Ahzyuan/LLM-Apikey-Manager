@@ -389,8 +389,8 @@ cmd_edit() {
         env_keys=$(printf "%s, " "${keys_array[@]}")
         env_keys="${env_keys%, }"  # Remove trailing comma
     else
-            env_keys="(none)"
-        fi
+        env_keys="(none)"
+    fi
 
     # Show current profile details
     echo -e "${BLUE}Editing profile${NC}"
@@ -719,26 +719,32 @@ cmd_edit() {
 # Delete profile with enhanced validation
 cmd_delete() {
     local name="$1"
+    local arg_error=false
     
     if [[ -z "$name" ]]; then
         log_error "Profile name is required!"
-        echo "Usage: lam delete <profile_name>"
+        log_info "Usage: lam delete <profile_name>"
+        arg_error=true
+    elif ! profile_exists "$name"; then
+        log_error "Profile ${PURPLE}'$name'${NC} not found!"
+        arg_error=true
+    fi
+    
+    if $arg_error; then
+        local profiles_cnt=$(get_profile_count)
+        if [[ $profiles_cnt -gt 0 ]]; then
+            log_info "Available profiles:" >&2
+            get_profile_names | sed 's/^/• /' >&2
+        else
+            log_info "No profiles found" >&2
+            log_gray "You can use ${PURPLE}'lam add <profile_name>'${GRAY} to add a profile" >&2
+        fi
         exit 1
     fi
     
-    # Verify master password for sensitive operation
-    if ! get_verified_master_password >/dev/null; then
-        log_error "Authentication failed"
-        exit 1
-    fi
-    
-    # Check if profile exists
-    if ! profile_exists "$name"; then
-        log_error "Profile '$name' not found!"
-        echo
-        log_info "Available profiles:"
-        get_profile_names | sed 's/^/• /'
-        exit 1
+    local master_password
+    if ! master_password=$(get_verified_master_password); then
+        return 1
     fi
     
     local profile
@@ -748,66 +754,42 @@ cmd_delete() {
     echo -e "${RED}Profile to delete${NC}"
     echo "=================="
     
-    # Parse profile data
-    local description env_keys
-    description=$(echo "$profile" | grep -o '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "No description")
+    local model_name description
+    model_name=$(echo "$profile" | jq -r '.model_name // "Not specified"')
+    description=$(echo "$profile" | jq -r '.description // "No description"')
     
-    # Extract environment variable keys
     local env_keys
+    local env_keys_list
+    env_keys_list=$(echo "$profile" | jq -r '.env_vars | keys[]?' 2>/dev/null)
     
-    # Check if env_vars exists and is not empty
-    if echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{[[:space:]]*}'; then
-        # Empty env_vars object
-        env_keys="(none)"
-    elif echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{.*}'; then
-        # Non-empty env_vars object
-        local env_vars_section
-        env_vars_section=$(echo "$profile" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
-        env_keys=""
+    if [[ -n "$env_keys_list" ]]; then
+        local keys_array=()
+        mapfile -t keys_array <<< "$env_keys_list"
         
-        if [[ -n "$env_vars_section" ]]; then
-            while read -r pair; do
-                if [[ -n "$pair" ]]; then
-                    local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
-                    if [[ -n "$env_keys" ]]; then
-                        env_keys="$env_keys, $key"
-                    else
-                        env_keys="$key"
-                    fi
-                fi
-            done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
-        fi
-        
-        if [[ -z "$env_keys" ]]; then
-            env_keys="(none)"
-        fi
+        env_keys=$(printf "%s, " "${keys_array[@]}")
+        env_keys="${env_keys%, }"  # Remove trailing comma
     else
         env_keys="(none)"
     fi
     
-    echo -e "${PURPLE}Name${NC}: $name"
+    echo -e "${PURPLE}Profile Name${NC}: $name"
+    echo -e "${PURPLE}Model Name${NC}: $model_name"
     echo -e "${PURPLE}Description${NC}: $description"
     echo -e "${PURPLE}Environment Variables${NC}: $env_keys"
     echo
     
     log_warning "⚠️  This action cannot be undone!"
-    echo -en "${RED}Are you sure you want to delete profile '$name'?${NC} (y/N): "
+    echo -en "${RED}Are you sure you want to delete profile ${PURPLE}'$name'${RED}?${NC} (y/N): "
     local confirm
     if ! read -r confirm; then
         log_error "Failed to read confirmation"
         return 1
     fi
     
-    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+    if [[ $confirm != [Yy] ]]; then
         log_info "Deletion cancelled."
         return 0
     fi
     
-    # Delete profile from database
-    if ! delete_profile "$name"; then
-        log_error "Failed to delete profile"
-        return 1
-    fi
-    
-    log_success "Profile '$name' deleted successfully!"
+    delete_profile "$name" || return 1
 }
