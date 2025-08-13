@@ -262,81 +262,74 @@ cmd_use() {
     local name="$1"
     
     if [[ -z "$name" ]]; then
-        log_error "Profile name is required!"
-        echo "Usage: lam use <profile_name>"
+        log_error "Profile name is required!" >&2
+        echo "Usage: source <(lam use <profile_name>)" >&2
+        log_info "Available profiles:" >&2
+        get_profile_names | sed 's/^/• /' >&2
         return 1
     fi
-    
-    # Verify master password for sensitive operation
-    if ! get_verified_master_password >/dev/null; then
-        log_error "Authentication failed"
-        return 1
-    fi
-        
-    # Check if profile exists
+
     if ! profile_exists "$name"; then
-        log_error "Profile '$name' not found!" >&2
+        log_error "Profile ${PURPLE}'$name'${NC} not found!" >&2
         log_info "Available profiles:" >&2
         get_profile_names | sed 's/^/• /' >&2
         exit 1
     fi
     
-    local profile
-    profile=$(get_profile "$name")
-
-    # Check if we're being called within eval (stdout will be captured)
-    if [[ -t 1 ]]; then
-        log_info "💡 To use profile ${GREEN}'$name'${NC}, run: ${PURPLE}source <(lam use $name)${NC}"
-        return 0
-    fi
-    
-    # Parse model name
-    local model_name
-    model_name=$(echo "$profile" | grep -o '"model_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"model_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "unknown")
-    
-    # Update last used timestamp
-    if ! update_profile_last_used "$name"; then
-        log_error "Failed to save configuration"
+    local master_password
+    if ! master_password=$(get_verified_master_password); then
         return 1
     fi
     
-    # Export environment variables for shell sourcing
-    echo "# LAM Profile: $name (Model: $model_name)"
-    
-    # Extract and export environment variables
-    local exported_vars=""
-    
-    # Check if env_vars exists and is not empty
-    if echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{[[:space:]]*}'; then
-        # Empty env_vars object - no variables to export
-        exported_vars=""
-    elif echo "$profile" | grep -q '"env_vars"[[:space:]]*:[[:space:]]*{.*}'; then
-        # Non-empty env_vars object
-        local env_vars_section
-        env_vars_section=$(echo "$profile" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
-        
-        if [[ -n "$env_vars_section" ]]; then
-            while read -r pair; do
-                if [[ -n "$pair" ]]; then
-                    local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
-                    local value=$(echo "$pair" | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
-                    
-                    if [[ -n "$key" && -n "$value" ]]; then
-                        echo "export $key='$value'"
-                        if [[ -n "$exported_vars" ]]; then
-                            exported_vars="$exported_vars, $key"
-                        else
-                            exported_vars="$key"
-                        fi
-                    fi
-                fi
-            done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
-        fi
+    local profile
+    profile=$(get_profile "$name")
+
+    # Check if we're being called within source
+    if [[ -t 1 ]]; then
+        log_info "💡 To use profile ${PURPLE}'$name'${NC}, run: ${PURPLE}source <(lam use $name)${NC}"
+        return 0
     fi
     
-    echo "export LLM_CURRENT_PROFILE='$name'"
-    log_success "Profile ${GREEN}'$name'${NC} activated!" >&2
-    log_info "Variables exported: $exported_vars, LLM_CURRENT_PROFILE" >&2
+    local model_name
+    model_name=$(echo "$profile" | jq -r '.model_name // "unknown"')
+    
+    # Update last used timestamp
+    if ! update_profile_last_used "$name" 2>/dev/null; then
+        log_warning "Failed to update last used timestamp" >&2
+    fi
+    
+    # Extract and export environment variables using jq
+    local exported_vars=""
+    local env_keys
+    log_info "Loading profile ${PURPLE}'$name'${NC}..." >&2
+    env_keys=$(echo "$profile" | jq -r '.env_vars | keys[]?' 2>/dev/null)
+    
+    if [[ -n "$env_keys" ]]; then
+        while IFS= read -r key; do
+            local encrypted_value
+            encrypted_value=$(echo "$profile" | jq -r --arg k "$key" '.env_vars[$k].value' 2>/dev/null)
+        
+            if [[ -n "$encrypted_value" && "$encrypted_value" != "null" ]]; then
+                local decrypted_value
+                if ! decrypted_value=$(decrypt_data "$encrypted_value" "$master_password"); then
+                    log_error "Failed to decrypt environment variable: $key" >&2
+                    exit 1
+                fi
+                
+                echo "export $key='$decrypted_value'"
+                if [[ -n "$exported_vars" ]]; then
+                    exported_vars="$exported_vars, ${GREEN}$key${NC}"
+                else
+                    exported_vars="${GREEN}$key${NC}"
+                fi
+            fi
+        done <<< "$env_keys"
+
+        log_success "Profile ${PURPLE}'$name'${NC} activated!" >&2
+        log_info "Variables exported: $exported_vars" >&2
+    else
+        log_info "No environment variables found for profile ${PURPLE}'$name'${NC}" >&2
+    fi
 }
 
 # Edit existing configuration with enhanced validation
