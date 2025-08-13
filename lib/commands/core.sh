@@ -191,18 +191,7 @@ cmd_list() {
 cmd_show() {
     local name="$1"
     
-    if [[ -z "$name" ]]; then
-        log_error "Profile name is required!"
-        log_info "Usage: lam show <profile_name>"
-        return 1
-    fi
-
-    if ! profile_exists "$name"; then
-        log_error "Profile ${PURPLE}'$name'${NC} not found!" >&2
-        log_info "Available profiles:" >&2
-        get_profile_names | sed 's/^/• /' >&2
-        exit 1
-    fi
+    check_profile_arg "$name"
     
     local profile
     profile=$(get_profile "$name")
@@ -268,20 +257,7 @@ cmd_show() {
 cmd_use() {
     local name="$1"
     
-    if [[ -z "$name" ]]; then
-        log_error "Profile name is required!" >&2
-        log_info "Usage: source <(lam use <profile_name>)" >&2
-        log_info "Available profiles:" >&2
-        get_profile_names | sed 's/^/• /' >&2
-        return 1
-    fi
-
-    if ! profile_exists "$name"; then
-        log_error "Profile ${PURPLE}'$name'${NC} not found!" >&2
-        log_info "Available profiles:" >&2
-        get_profile_names | sed 's/^/• /' >&2
-        exit 1
-    fi
+    check_profile_arg "$name"
     
     local master_password
     if ! master_password=$(get_verified_master_password); then
@@ -343,20 +319,7 @@ cmd_use() {
 cmd_edit() {
     local name="$1"
     
-    if [[ -z "$name" ]]; then
-        log_error "Profile name is required!"
-        log_info "Usage: lam edit <profile_name>"
-        log_info "Available profiles:"
-        get_profile_names | sed 's/^/• /'
-        exit 1
-    fi
-    
-    if ! profile_exists "$name"; then
-        log_error "Profile ${PURPLE}'$name'${NC} not found!"
-        log_info "Available profiles:"
-        get_profile_names | sed 's/^/• /'
-        exit 1
-    fi
+    check_profile_arg "$name"
 
     local master_password
     if ! master_password=$(get_verified_master_password); then
@@ -497,7 +460,7 @@ cmd_edit() {
                 
                 local env_vars_data
                 env_vars_data=$(echo "$env_vars_json" | jq -r 'to_entries[] | "\(.key)|\(.value.value)"' 2>/dev/null)
-                    
+                
                 if [[ -n "$env_vars_data" ]]; then
                     while IFS='|' read -r key encrypted_value; do
                         if [[ -n "$key" && -n "$encrypted_value" && "$encrypted_value" != "null" ]]; then
@@ -506,7 +469,7 @@ cmd_edit() {
                                 echo -e "└─ ${GREEN}• $key${NC} = $decrypted_value"
                             else
                                 echo -e "└─ ${GREEN}• $key${NC} = ${RED}[DECRYPT ERROR]${NC}"
-                        fi
+                            fi
                         fi
                     done <<< "$env_vars_data"
                     
@@ -605,7 +568,7 @@ cmd_edit() {
                             # Add/update the environment variable in working copy using jq
                             env_vars_json=$(echo "$env_vars_json" | jq --arg key "$new_env_name" --argjson obj "$new_env_object" '.[$key] = $obj')
                             has_changes=true
-                                log_success "Added/Updated: $new_env_name"
+                            log_success "Added/Updated: $new_env_name"
                             ;;
                         "2")
                             local env_keys=()
@@ -650,7 +613,7 @@ cmd_edit() {
                             
                             env_vars_json=$(echo "$env_vars_json" | jq --arg key "$key_to_delete" 'del(.[$key])')
                             has_changes=true
-                                log_success "Deleted: $key_to_delete"
+                            log_success "Deleted: $key_to_delete"
                             ;;
                         "3")
                             log_info "Exit environment variable editing."
@@ -712,7 +675,7 @@ cmd_edit() {
                 log_error "Invalid option"
                 continue
                 ;;
-        esac
+        esac        
     done
 }
 
@@ -721,26 +684,7 @@ cmd_delete() {
     local name="$1"
     local arg_error=false
     
-    if [[ -z "$name" ]]; then
-        log_error "Profile name is required!"
-        log_info "Usage: lam delete <profile_name>"
-        arg_error=true
-    elif ! profile_exists "$name"; then
-        log_error "Profile ${PURPLE}'$name'${NC} not found!"
-        arg_error=true
-    fi
-    
-    if $arg_error; then
-        local profiles_cnt=$(get_profile_count)
-        if [[ $profiles_cnt -gt 0 ]]; then
-            log_info "Available profiles:" >&2
-            get_profile_names | sed 's/^/• /' >&2
-        else
-            log_info "No profiles found" >&2
-            log_gray "You can use ${PURPLE}'lam add <profile_name>'${GRAY} to add a profile" >&2
-        fi
-        exit 1
-    fi
+    check_profile_arg "$name"
     
     local master_password
     if ! master_password=$(get_verified_master_password); then

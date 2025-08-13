@@ -96,6 +96,32 @@ check_initialization() {
     fi
 }
 
+check_profile_arg() { 
+    local name="$1"
+    
+    local arg_error=false
+    if [[ -z "$name" ]]; then
+        log_error "Profile name is required!"
+        log_info "Usage: lam delete <profile_name>"
+        arg_error=true
+    elif ! profile_exists "$name"; then
+        log_error "Profile ${PURPLE}'$name'${NC} not found!"
+        arg_error=true
+    fi
+    
+    if $arg_error; then
+        local profiles_cnt=$(get_profile_count)
+        if [[ $profiles_cnt -gt 0 ]]; then
+            log_info "Available profiles:" >&2
+            get_profile_names | sed 's/^/• /' >&2
+        else
+            log_info "No profiles found" >&2
+            log_gray "You can use ${PURPLE}'lam add <profile_name>'${GRAY} to add a profile" >&2
+        fi
+        exit 1
+    fi
+}
+
 # -------------------------------- Input Validation --------------------------------
 # Secure input validation functions
 validate_input_length() {
