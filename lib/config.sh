@@ -35,9 +35,9 @@ init_database() {
             name TEXT UNIQUE NOT NULL,
             model_name TEXT NOT NULL,
             description TEXT DEFAULT 'No description provided',
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
             last_used TEXT,
-            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
 
         -- Environment variables table (normalized design)
@@ -64,7 +64,7 @@ init_database() {
             encrypted_info TEXT NOT NULL,  -- Self-encrypted verification data
             salt TEXT NOT NULL,                   -- Random salt for additional security
             checksum TEXT NOT NULL,               -- Integrity checksum
-            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
         );
 
         -- Indexes for performance
@@ -76,7 +76,7 @@ init_database() {
         CREATE TRIGGER IF NOT EXISTS update_profiles_timestamp 
         AFTER UPDATE ON profiles
         BEGIN
-            UPDATE profiles SET updated_at = datetime('now') WHERE id = NEW.id;
+            UPDATE profiles SET updated_at = datetime('now', 'localtime') WHERE id = NEW.id;
         END;
     "
     
@@ -376,7 +376,7 @@ update_profile() {
         local IFS=','
         update_sql+=" ${updates[*]} WHERE name = '$name';"
         
-        if ! execute_sql "$update_sql"; then
+        if ! execute_sql "$update_sql" 2>/dev/null; then
             log_error "Failed to update profile"
             return 1
         fi
@@ -444,7 +444,7 @@ update_profile_last_used() {
     
     local sql="
         UPDATE profiles 
-        SET last_used = datetime('now')
+        SET last_used = datetime('now', 'localtime')
         WHERE name = '$name';
     "
     
