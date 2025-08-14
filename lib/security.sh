@@ -527,17 +527,6 @@ create_session() {
         return 1
     fi
     
-    # Create session directory if it doesn't exist
-    local session_dir
-    session_dir=$(dirname "$SESSION_FILE")
-    if [[ ! -d "$session_dir" ]]; then
-        if ! mkdir -p "$session_dir"; then
-            log_error "Failed to create session directory"
-            return 1
-        fi
-        chmod 700 "$session_dir"
-    fi
-    
     # Create temporary session file
     local temp_session
     if ! temp_session=$(create_temp_file); then

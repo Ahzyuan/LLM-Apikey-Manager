@@ -140,46 +140,29 @@ cmd_init() {
 }
 
 # Show LAM status and statistics
-cmd_status() {
-    # Check if LAM is initialized
-    if ! check_initialization; then
-        log_error "LAM is not initialized"
-        return 1
-    fi
-    
+cmd_status() {    
     # Check if session exists and is valid, if not create one
-    if [[ ! -f "$SESSION_FILE" ]] || ! is_session_valid; then
-        if ! get_verified_master_password >/dev/null; then
-            log_error "Authentication failed"
+    if ! is_session_valid; then
+        local master_password
+        if master_password=$(get_verified_master_password); then
+            create_session "$master_password" || exit 1
+        else
             return 1
         fi
-        echo
     fi
-    
-    echo "LAM Status & Statistics"
-    echo "======================"
     echo
     
     # Session info
-    echo -e "${BLUE}Session Details${NC}"
-    echo "---------------"
-    if is_session_valid; then
-        log_gray "• Status: Active"
-        local session_age
-        session_age=$(( $(date +%s) - $(stat -c %Y "$SESSION_FILE" 2>/dev/null || echo 0) ))
-        log_gray "• Session Age: ${session_age}s / ${SESSION_TIMEOUT}s"
-    else
-        log_gray "• Status: Session creation failed"
-        log_gray "• Session Age: N/A"
-    fi
-    echo
+    local session_age
+    session_age=$(( $(date +%s) - $(stat -c %Y "$SESSION_FILE" 2>/dev/null || echo 0) ))
+    echo -e "${BLUE}✦ Session Age${NC}: ${GRAY}${session_age}s / ${SESSION_TIMEOUT}s${NC}"
+    echo 
     
     # Profile statistics
     local profile_count
     profile_count=$(get_profile_count)
     
-    echo -e "${BLUE}Profile Details${NC}"
-    echo "---------------"
+    echo -e "${BLUE}✦ Profile Details${NC}"
     
     if [[ "$profile_count" -gt 0 ]]; then
         local current_profile="${LLM_CURRENT_PROFILE:-}"
@@ -188,46 +171,22 @@ cmd_status() {
         
         while IFS= read -r profile_name; do
             if [[ -n "$profile_name" ]]; then
-                local profile
+                local profile env_count last_used
                 profile=$(get_profile "$profile_name")
+
+                env_count=$(echo "$profile" | jq -r '.env_vars | length' 2>/dev/null || echo "0")
+                last_used=$(echo "$profile" | jq -r '.last_used // "Never"' 2>/dev/null || echo "Never")
                 
-                # Parse environment variable count
-                local env_count=0
-                
-                # Check if env_vars exists and is not empty - simplified approach
-                if echo "$profile" | grep -q '"env_vars".*:.*{}'; then
-                    # Empty env_vars object
-                    env_count=0
-                elif echo "$profile" | grep -q '"env_vars".*:.*{.*}'; then
-                    # Non-empty env_vars object - count the key-value pairs
-                    local env_vars_content
-                    env_vars_content=$(echo "$profile" | sed -n 's/.*"env_vars"[[:space:]]*:[[:space:]]*{\([^}]*\)}.*/\1/p')
-                    
-                    if [[ -n "$env_vars_content" && "$env_vars_content" != "" ]]; then
-                        # Count the number of key-value pairs by counting commas + 1
-                        env_count=$(echo "$env_vars_content" | grep -o ',' | wc -l)
-                        env_count=$((env_count + 1))
-                    fi
-                fi
-                
-                # Parse last used
-                local last_used
-                last_used=$(echo "$profile" | grep -o '"last_used"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"last_used"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "Never")
-                if [[ "$last_used" == "null" || -z "$last_used" ]]; then
-                    last_used="Never"
-                fi
-                
-                # Check if this is the active profile
                 if [[ "$profile_name" == "$current_profile" ]]; then
-                    echo -e "• ${GREEN}$profile_name (active)${NC}: $env_count env vars, last used: $last_used"
+                    echo -e "  └─ ${GREEN}$profile_name (active)${NC}: $env_count env vars, last used: $last_used"
                 else
-                    log_gray "• $profile_name: $env_count env vars, last used: $last_used"
+                    log_gray "  └─ $profile_name: $env_count env vars, last used: $last_used"
                 fi
             fi
         done <<< "$profile_names"
     else
-        echo "No profiles configured yet."
-        echo "Use 'lam add <profile_name>' to add a profile."
+        log_gray "No profiles configured yet."
+        log_gray "Use ${PURPLE}'lam add <profile_name>'${GRAY} to add a profile."
     fi
     echo 
 }
