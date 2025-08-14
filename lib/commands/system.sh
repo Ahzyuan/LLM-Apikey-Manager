@@ -302,30 +302,20 @@ show_manual_update_instructions() {
 
 # Uninstall LAM with complete cleanup
 cmd_uninstall() {
-    # Verify master password for this sensitive operation
-    if check_initialization 2>/dev/null; then
-        log_info "Please verify your master password before uninstalling:"
-        if ! get_verified_master_password >/dev/null; then
-            log_error "Authentication failed - cannot uninstall without password verification"
-            return 1
-        fi
-        echo
+    local master_password
+    if ! master_password=$(get_verified_master_password); then
+        return 1
     fi
     
-    log_warning "This will completely remove LAM from your system!"
-    echo
-    echo "The following will be removed:"
-    echo "=============================="
-    
     # Find installation locations
-    local current_script
+    local current_script script_dir
     current_script=$(readlink -f "$0")
-    local script_dir
     script_dir=$(dirname "$current_script")
     
     # Determine installation type and paths
     local wrapper_script=""
     local lib_dir=""
+    local is_system_install=false
     
     # Check if this is a wrapper script or main executable
     if [[ "$current_script" == *"/bin/lam" ]]; then
@@ -334,6 +324,7 @@ cmd_uninstall() {
         # Find the actual installation directory
         if [[ "$current_script" == "/usr/local/bin/lam" ]]; then
             lib_dir="/usr/local/share/lam"
+            is_system_install=true
         elif [[ "$current_script" == "$HOME/.local/bin/lam" ]]; then
             lib_dir="$HOME/.local/share/lam"
         fi
@@ -342,53 +333,58 @@ cmd_uninstall() {
         if [[ "$script_dir" == "/usr/local/share/lam" ]]; then
             wrapper_script="/usr/local/bin/lam"
             lib_dir="/usr/local/share/lam"
+            is_system_install=true
         elif [[ "$script_dir" == "$HOME/.local/share/lam" ]]; then
             wrapper_script="$HOME/.local/bin/lam"
             lib_dir="$HOME/.local/share/lam"
         else
-            # Fallback: try to find wrapper
-            for potential_wrapper in "/usr/local/bin/lam" "$HOME/.local/bin/lam"; do
-                if [[ -f "$potential_wrapper" ]]; then
-                    wrapper_script="$potential_wrapper"
-                    break
-                fi
-            done
-            lib_dir="$script_dir"
+            log_error "Unsupported installation directory: ${PURPLE}$script_dir${NC}"
+            log_error "Uninstall aborted."
+            exit 1
         fi
     fi
     
+    # Early sudo detection for system-wide installations
+    if [[ $is_system_install == true && $EUID -ne 0 ]]; then
+        echo
+        log_warning "LAM was installed system-wide and requires ${PURPLE}'sudo'${NC} privileges to remove."
+        log_warning "Please use ${PURPLE}'sudo lam uninstall'${NC} to uninstall LAM."
+        exit 1
+    fi
+    
     # Show what will be removed
+    log_warning "This will completely remove LAM from your system!"
+    echo
+    echo "The following will be removed:"
+    echo "=============================="
+    
     if [[ -f "$wrapper_script" ]]; then
-        echo "• LAM wrapper script: $wrapper_script"
+        echo -e "• ${PURPLE}LAM wrapper script${NC}: $wrapper_script"
         echo
     fi
     
     if [[ -d "$lib_dir" ]]; then
-        echo "• LAM installation directory: $lib_dir"
+        echo -e "• ${PURPLE}LAM installation directory${NC}: $lib_dir"
         log_gray "  ├─ Main executable: $lib_dir/lam"
         log_gray "  ├─ VERSION file: $lib_dir/VERSION"
         log_gray "  └─ Library modules: $lib_dir/lib/"
         echo
     fi
     
-    # Check for user configuration
     if [[ -d "$CONFIG_DIR" ]]; then
-        echo "• Configuration directory: $CONFIG_DIR"
-        log_gray "  (contains encrypted API keys and profiles)"
+        echo -e "• ${PURPLE}Configuration directory${NC}: $CONFIG_DIR"
+        log_gray "  (contains all of your encrypted profiles)"
         echo
     fi
     
-    # Check for LAM backup directory
     local backup_dir="$HOME/.lam-backups"
     if [[ -d "$backup_dir" ]]; then
-        echo "• LAM backup directory: $backup_dir"
-        local backup_count
-        backup_count=$(find "$backup_dir" -name "*.tar.gz" 2>/dev/null | wc -l)
+        echo -e "• ${PURPLE}LAM backup directory${NC}: $backup_dir"
+        local backup_count=$(find "$backup_dir" -name "*.tar.gz" 2>/dev/null | wc -l)
         log_gray "  (contains $backup_count configuration backup(s))"
         echo
     fi
     
-    # Check for backup files
     local backup_files=()
     for potential_backup in "$wrapper_script.backup" "$lib_dir/lam.backup" "$current_script.backup"; do
         if [[ -f "$potential_backup" ]]; then
@@ -397,16 +393,15 @@ cmd_uninstall() {
     done
     
     if [[ ${#backup_files[@]} -gt 0 ]]; then
-        echo "• Installation backup files:"
+        echo -e "• ${PURPLE}Installation backup files${NC}:"
         for backup in "${backup_files[@]}"; do
-            echo "  • $backup"
+            log_gray "  └─ $backup"
         done
         echo
     fi
     
-    echo
     log_warning "⚠️  This action cannot be undone!"
-    log_gray "   Your encrypted API keys and profiles will be permanently deleted."
+    log_warning "All of your encrypted profiles and backups will be permanently deleted."
     echo
     
     echo -en "${RED}Are you sure you want to uninstall LAM?${NC} (type 'yes' to confirm): "
@@ -423,65 +418,61 @@ cmd_uninstall() {
     
     echo
     log_info "Uninstalling LAM..."
+    local need_manual_cleanup=false cmd_prefix=""
+    if $is_system_install; then
+        cmd_prefix="sudo "
+    fi
     
     # Remove configuration directory (includes session files) FIRST
     if [[ -d "$CONFIG_DIR" ]]; then
-        if rm -rf "$CONFIG_DIR"; then
-            log_success "Removed configuration directory and all session data"
-        else
-            log_error "Failed to remove configuration directory"
-            log_info "You can manually delete this directory by running 'rm -rf $CONFIG_DIR'."
-            echo
+        if ! rm -rf "$CONFIG_DIR"; then
+            need_manual_cleanup=true
+            log_error "Failed to remove configuration directory."
+            log_info "You can manually delete this directory by running ${PURPLE}'${cmd_prefix}rm -rf $CONFIG_DIR'${NC}."
         fi
     fi
     
     # Remove LAM backup directory
     if [[ -d "$backup_dir" ]]; then
-        if rm -rf "$backup_dir"; then
-            log_success "Removed LAM backup directory and all backups"
-        else
-            log_error "Failed to remove LAM backup directory"
-            log_info "You can manually delete this directory by running 'rm -rf $backup_dir'."
-            echo
+        if ! rm -rf "$backup_dir"; then
+            need_manual_cleanup=true
+            log_error "Failed to remove LAM backup directory."
+            log_info "You can manually delete this directory by running ${PURPLE}'${cmd_prefix}rm -rf $backup_dir'${NC}."
         fi
     fi
     
     # Remove installation backup files
     for backup in "${backup_files[@]}"; do
-        if [[ -f "$backup" ]]; then
-            if rm -f "$backup"; then
-                log_success "Removed installation backup file: $backup"
-            else
-                log_warning "Failed to remove installation backup file: $backup"
-                log_info "You can manually delete this file by running 'rm -f $backup'."
-                echo
-            fi
+        if ! rm -f "$backup" 2>/dev/null; then
+            need_manual_cleanup=true
+            log_error "Failed to remove installation backup file: ${PURPLE}$backup${NC}."
+            log_info "You can manually delete this file by running ${PURPLE}'${cmd_prefix}rm -f $backup'${NC}."
         fi
     done
     
     # Remove LAM installation directory
     if [[ -d "$lib_dir" && "$lib_dir" != "/" && "$lib_dir" != "$HOME" ]]; then
-        if rm -rf "$lib_dir"; then
-            log_success "Removed LAM installation directory: $lib_dir"
-        else
-            log_error "Failed to remove LAM installation directory: $lib_dir"
-            log_info "You can manually delete this directory by running 'rm -rf $lib_dir'."
+        if ! rm -rf "$lib_dir" 2>/dev/null; then
+            need_manual_cleanup=true
+            log_error "Failed to remove LAM installation directory: ${PURPLE}$lib_dir${NC}."
+            log_info "You can manually delete this directory by running ${PURPLE}'${cmd_prefix}rm -rf $lib_dir'${NC}."
         fi
     fi
     
     # Remove wrapper script
     if [[ -f "$wrapper_script" && "$wrapper_script" != "$current_script" ]]; then
-        if rm -f "$wrapper_script"; then
-            log_success "Removed LAM wrapper script: $wrapper_script"
-        else
-            log_error "Failed to remove LAM wrapper script: $wrapper_script"
-            log_info "You can manually delete this file by running 'rm -f $wrapper_script'."
-            echo
+        if ! rm -f "$wrapper_script" 2>/dev/null; then
+            need_manual_cleanup=true
+            log_error "Failed to remove LAM wrapper script: ${PURPLE}$wrapper_script${NC}."
+            log_info "You can manually delete this file by running ${PURPLE}'${cmd_prefix}rm -f $wrapper_script'${NC}."
         fi
     fi
     
-    echo
-    log_success "LAM has been completely removed from your system! Goodbye! 👋"
+    if $need_manual_cleanup; then
+        log_success "LAM has been removed, however some files cannot be deleted because of privileges. Please manually delete them 👆."
+    else
+        log_success "LAM has been completely removed from your system! Goodbye! 👋"
+    fi
     
     # If we're running the wrapper script, just exit
     # If we're running the main executable, use self-deletion
