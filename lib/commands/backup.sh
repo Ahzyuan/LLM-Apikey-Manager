@@ -3,7 +3,6 @@
 # LAM Backup Commands
 # All backup management functionality
 
-# Enhanced backup management system
 cmd_backup() {
     local action="${1:-help}"
     local backup_name="${2:-}"
@@ -112,22 +111,12 @@ _interactive_selection() {
 backup_create() {
     local backup_name="$1"
     
-    if [[ ! -d "$CONFIG_DIR" ]]; then
-        log_error "No LAM configuration found to backup"
-        log_info "This usually means LAM hasn't been initialized yet."
-        log_info "To fix this:"
-        log_info "• Run 'lam init' to initialize LAM with a master password"
-        log_info "• Then add profiles using 'lam add <profile_name>'"
-        log_info "• After that, you can create backups with 'lam backup create'"
-        return 1
-    fi
-    
     # Generate backup filename
     local backup_file
     if [[ -n "$backup_name" ]]; then
         # Validate custom backup name
         if [[ ! "$backup_name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-            log_error "Invalid backup name. Use only alphanumeric characters, dots, dashes, and underscores."
+            log_error "Invalid backup name ${PURPLE}$backup_name${NC}. Use only alphanumeric characters, dots, dashes, and underscores."
             return 1
         fi
         backup_file="${backup_name}-$(date +%Y%m%d-%H%M%S).tar.gz"
@@ -139,10 +128,9 @@ backup_create() {
     local backup_dir="$HOME/.lam-backups"
     if [[ ! -d "$backup_dir" ]]; then
         if ! mkdir -p "$backup_dir"; then
-            log_error "Failed to create backup directory: $backup_dir"
+            log_error "Failed to create backup directory: ${PURPLE}$backup_dir${NC}"
             log_info "Please check your permissions and try again."
-            log_info "Or you can manually create it by running:"
-            log_gray "  mkdir -p $backup_dir && chmod 700 $backup_dir"
+            log_info "Or you can manually create it by running: ${PURPLE}mkdir -p $backup_dir && chmod 700 $backup_dir${NC}"
             return 1
         fi
         chmod 700 "$backup_dir"
@@ -151,127 +139,90 @@ backup_create() {
     local backup_path="$backup_dir/$backup_file"
     
     log_info "Creating backup..."
-    echo
     
-    # Get current configuration for metadata
-    if check_initialization; then
-        local profile_count
-        profile_count=$(get_profile_count)
+    local profile_count
+    profile_count=$(get_profile_count)
+    if [ $profile_count -eq 0 ]; then
+        log_info "No profiles found. Skipping backup..." 
+        exit 0
+    fi
         
-        # Extract profile information
-        local profile_names_list
-        profile_names_list=$(get_profile_names | tr '\n' ',' | sed 's/,$//')
+    local profile_details="[]"
+    local profile_names profile_names_list
+    profile_names=$(get_profile_names)
+    profile_names_list=$(echo "$profile_names" | tr '\n' ',' | sed 's/,$//')
+    
+    while IFS= read -r profile_name; do
+        local profile_json
+        profile_json=$(get_profile "$profile_name")
         
-        # Create profile details array with comprehensive info (without sensitive values)
-        local profile_details="["
-        local first=true
-        local profile_names
-        profile_names=$(get_profile_names)
+        local profile_detail
+        profile_detail=$(echo "$profile_json" | jq -c \
+            --arg name "$profile_name" \
+            '{
+                name: $name,
+                env_var_names: (.env_vars | keys),
+                model_name: (.model_name // "not specified"),
+                description: (.description // "no description"),
+                created: (.created // "unknown")
+            }' 2>/dev/null)
         
-        while IFS= read -r profile_name; do
-            if [[ -n "$profile_name" ]]; then
-                local profile_json
-                profile_json=$(get_profile "$profile_name")
-                
-                # Parse profile data
-                local model_name description created_at
-                model_name=$(echo "$profile_json" | grep -o '"model_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"model_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "not specified")
-                description=$(echo "$profile_json" | grep -o '"description"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "no description")
-                created_at=$(echo "$profile_json" | grep -o '"created"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"created"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' || echo "unknown")
-                
-                # Extract environment variable names correctly
-                local env_vars_section env_var_names
-                env_vars_section=$(echo "$profile_json" | grep -o '"env_vars"[[:space:]]*:[[:space:]]*{[^}]*}' | sed 's/"env_vars"[[:space:]]*:[[:space:]]*{//; s/}$//')
-                env_var_names="["
-                local env_first=true
-                
-                if [[ -n "$env_vars_section" ]]; then
-                    while read -r pair; do
-                        if [[ -n "$pair" ]]; then
-                            local key=$(echo "$pair" | sed 's/.*"\([^"]*\)"[[:space:]]*:.*/\1/')
-                            if [[ "$env_first" == true ]]; then
-                                env_first=false
-                            else
-                                env_var_names+=","
-                            fi
-                            env_var_names+="\"$key\""
-                        fi
-                    done <<< "$(echo "$env_vars_section" | grep -o '"[^"]*"[[:space:]]*:[[:space:]]*"[^"]*"')"
-                fi
-                
-                env_var_names+="]"
-                
-                if [[ "$first" == true ]]; then
-                    first=false
-                else
-                    profile_details+=","
-                fi
-                profile_details+="{\"name\":\"$profile_name\",\"env_var_names\":$env_var_names,\"model_name\":\"$model_name\",\"description\":\"$description\",\"created\":\"$created_at\"}"
-            fi
-        done <<< "$profile_names"
-        profile_details+="]"
-        
-        # Create backup with metadata
-        local temp_dir
-        if ! temp_dir=$(mktemp -d); then
-            log_error "Failed to create temporary directory"
-            return 1
+        if [[ -n "$profile_detail" ]]; then
+            profile_details=$(echo "$profile_details" | jq --argjson detail "$profile_detail" '. += [$detail]' 2>/dev/null)
         fi
-        TEMP_DIRS+=("$temp_dir")
+    done <<< "$profile_names"
+    
+    # Create backup with metadata
+    local temp_dir
+    if ! temp_dir=$(mktemp -d); then
+        log_error "Failed to create temporary directory"
+        return 1
+    fi
+    TEMP_DIRS+=("$temp_dir")
+    
+    # Copy configuration
+    cp -r "$CONFIG_DIR" "$temp_dir/lam-config"
+    
+    # Create metadata file with profile information using jq for proper JSON escaping
+    local backup_metadata
+    backup_metadata=$(jq -n \
+        --arg backup_created "$(date -Iseconds)" \
+        --arg lam_version "$(get_version_info | cut -d'|' -f1)" \
+        --arg profile_count "$profile_count" \
+        --arg backup_name "$backup_name" \
+        --arg original_config_dir "$CONFIG_DIR" \
+        --arg profile_names_list "$profile_names_list" \
+        --argjson profile_details "$profile_details" \
+        '{
+            backup_created: $backup_created,
+            lam_version: $lam_version,
+            profile_count: ($profile_count | tonumber),
+            backup_name: $backup_name,
+            original_config_dir: $original_config_dir,
+            profile_names: $profile_names_list,
+            profile_details: $profile_details
+        }')
+    
+    echo "$backup_metadata" > "$temp_dir/lam-config/backup-metadata.json"
         
-        # Copy configuration
-        cp -r "$CONFIG_DIR" "$temp_dir/lam-config"
-        
-        # Create metadata file with profile information
-        cat > "$temp_dir/lam-config/backup-metadata.json" << EOF
-{
-    "backup_created": "$(date -Iseconds)",
-    "lam_version": "$(get_version_info | cut -d'|' -f1)",
-    "profile_count": $profile_count,
-    "backup_name": "${backup_name:-auto}",
-    "original_config_dir": "$CONFIG_DIR",
-    "profile_names": "$profile_names",
-    "profile_details": $profile_details
-}
-EOF
-        
-        # Create the backup archive
-        if tar -czf "$backup_path" -C "$temp_dir" "lam-config" 2>/dev/null; then
-            log_success "Backup created: $backup_file"
-            log_info "Location: $backup_path"
-            log_info "Profiles backed up: $profile_count"
-            echo
-            log_info "💡 Backup Management Commands:"
-            log_gray "• List all backups: lam backup list"
-            log_gray "• Restore this backup: lam backup restore $backup_file"
-            log_gray "• Show backup details: lam backup info $backup_file"
-        else
-            log_error "Failed to create backup archive"
-            log_info "Possible causes and solutions:"
-            log_info "• Check if you have write permissions in $backup_dir"
-            log_info "• Ensure sufficient disk space is available"
-            log_info "• Check if tar command is available: which tar"
-            return 1
-        fi
+    # Create the backup archive
+    echo
+    if tar -czf "$backup_path" -C "$temp_dir" "lam-config" 2>/dev/null; then
+        log_success "Backup created: ${PURPLE}$backup_file${NC}"
+        log_success "Location: ${PURPLE}$backup_path${NC}"
+        log_success "Profiles backed up: ${PURPLE}$profile_count${NC}"
+        echo
+        log_info "💡 Backup Management Commands:"
+        log_gray "• List all backups: lam backup list"
+        log_gray "• Restore this backup: lam backup restore $backup_file"
+        log_gray "• Show backup details: lam backup info $backup_file"
     else
-        # Fallback: simple backup without metadata
-        if tar -czf "$backup_path" -C "$(dirname "$CONFIG_DIR")" "$(basename "$CONFIG_DIR")/" 2>/dev/null; then
-            log_success "Backup created: $backup_file"
-            log_info "Location: $backup_path"
-            echo
-            log_warning "Backup created without metadata (configuration not accessible)"
-            log_info "To create a complete backup with metadata:"
-            log_info "• Ensure your session is active by running 'lam status' first"
-            log_info "• Then retry: lam backup create [name]"
-            
-        else
-            log_error "Failed to create backup"
-            log_info "Possible causes and solutions:"
-            log_info "• Check if you have write permissions in $backup_dir"
-            log_info "• Ensure sufficient disk space is available"
-            log_info "• Check if tar command is available: which tar"
-            return 1
-        fi
+        log_error "Failed to create backup archive"
+        log_info "Possible causes and solutions:"
+        log_info "• Check if you have write permissions in ${PURPLE}$backup_dir${NC}"
+        log_info "• Ensure sufficient disk space is available"
+        log_info "• Check if tar command is available: ${PURPLE}which tar${NC}"
+        return 1
     fi
 }
 
@@ -539,12 +490,12 @@ backup_help() {
     echo "    • delete, del <filename>  Delete a backup file"
     echo "    • help, -h                Show this help message"
     echo
-    log_info "NOTE"
+    echo "💡 NOTE"
     log_gray "• Backup files are stored in $HOME/.lam-backups/"
     log_gray "• Each backup file include all profiles, settings, and session data"
     log_gray "• Restoring a backup will replace your current configuration"
     echo
-    log_info "EXAMPLES"
+    echo "🔮 EXAMPLES"
     log_gray "lam backup create                    # Create backup with auto-generated name"
     log_gray "lam backup create my-bak             # Create backup with custom name"
     log_gray "lam backup list                      # List all backups"
