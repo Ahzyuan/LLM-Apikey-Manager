@@ -9,6 +9,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
 NC='\033[0m'
 
 log_info() {
@@ -27,6 +28,9 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
+log_purple() {
+    echo -e "${PURPLE}$1${NC}" >&2
+}
 
 check_dependencies() {
     local deps=("sqlite3" "openssl" "curl" "tar" "jq")
@@ -73,22 +77,22 @@ check_install_scope() {
         # Running as root - system-wide installation
         INSTALL_DIR="/usr/local/bin"
         LAM_LIB_DIR="/usr/local/share/lam"
-        log_info "Installing system-wide to $INSTALL_DIR"
-        log_info "LAM libraries will be installed to $LAM_LIB_DIR"
+        log_info "Installing system-wide to ${PURPLE}$INSTALL_DIR${NC}"
+        log_info "LAM libraries will be installed to ${PURPLE}$LAM_LIB_DIR${NC}"
     else
         # Running as regular user - user installation
         INSTALL_DIR="$HOME/.local/bin"
         LAM_LIB_DIR="$HOME/.local/share/lam"
-        log_info "Installing for current user to $INSTALL_DIR"
-        log_info "LAM libraries will be installed to $LAM_LIB_DIR"
+        log_info "Installing for current user to ${PURPLE}$INSTALL_DIR${NC}"
+        log_info "LAM libraries will be installed to ${PURPLE}$LAM_LIB_DIR${NC}"
         
         # Create user bin directory if it doesn't exist
         mkdir -p "$INSTALL_DIR"
         
         # Check if INSTALL_DIR is in PATH
         if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
-            log_warning "Add $INSTALL_DIR to your PATH by adding this line to your ~/.bashrc or ~/.zshrc:"
-            echo "export PATH=\"\$PATH:$INSTALL_DIR\""
+            log_warning "Add ${PURPLE}$INSTALL_DIR${NC} to your PATH by adding this line to your ~/.bashrc or ~/.zshrc:"
+            log_purple "export PATH=\"\$PATH:$INSTALL_DIR\""
         fi
     fi
 }
@@ -122,7 +126,7 @@ check_file_integrity() {
         done
         
         if [[ ${#missing_modules[@]} -gt 0 ]]; then
-            log_error "Missing required library modules: ${missing_modules[*]}"
+            log_error "Missing required library modules: ${RED}${missing_modules[*]}${NC}"
             log_info "Please re-clone the LAM repository and try again"
             exit 1
         fi
@@ -142,8 +146,9 @@ check_file_integrity() {
         done
         
         if [[ ${#missing_command_modules[@]} -gt 0 ]]; then
-            log_error "Missing required command modules: ${missing_command_modules[*]}"
+            log_error "Missing required command modules: ${RED}${missing_command_modules[*]}${NC}"
             log_info "Please re-clone the LAM repository and try again"
+            log_info "LAM Repo: ${PURPLE}https://github.com/Ahzyuan/LLM-Apikey-Manager${NC}"
             exit 1
         fi
     fi
@@ -174,7 +179,7 @@ install_lam() {
     
     # Create directory structure
     mkdir -p "$lam_install_dir/lib/commands"
-    log_info "Creating LAM library directory: $lam_install_dir"
+    log_info "Creating LAM library directory: ${PURPLE}$lam_install_dir${NC}"
     
     # Install main executable
     cp "lam" "$lam_install_dir/lam"
@@ -204,8 +209,8 @@ exec "$lam_install_dir/lam" "\$@"
 EOF
     chmod +x "$wrapper_script"
     
-    log_success "LAM executable installed to $INSTALL_DIR/lam"
-    log_success "LAM libraries installed to $lam_install_dir"
+    log_success "LAM executable installed to ${PURPLE}$INSTALL_DIR/lam${NC}"
+    log_success "LAM libraries installed to ${PURPLE}$lam_install_dir${NC}"
 }
 
 test_installation() {
@@ -215,21 +220,21 @@ test_installation() {
     local lam_command
     if ! lam_command=$(command -v lam 2>/dev/null); then
         log_error "LAM command not found in PATH"
-        log_info "Trying to find LAM in installation directory: $INSTALL_DIR"
+        log_info "Trying to find LAM in installation directory: ${PURPLE}$INSTALL_DIR${NC}"
         
         # Fallback: check installation directory directly
         if [[ -x "$INSTALL_DIR/lam" ]]; then
             lam_command="$INSTALL_DIR/lam"
-            log_warning "LAM found at $lam_command but not in PATH"
-            log_info "You may need to add $INSTALL_DIR to your PATH or restart your shell"
+            log_warning "LAM found at ${PURPLE}$lam_command${NC} but not in PATH"
+            log_warning "You may need to add ${PURPLE}$INSTALL_DIR${NC} to your PATH or restart your shell"
         else
             log_error "LAM executable not found anywhere"
             log_info "Please re-clone the LAM repository and try again"
-            log_info "LAM Repo: https://github.com/Ahzyuan/LLM-Apikey-Manager"
+            log_info "LAM Repo: ${PURPLE}https://github.com/Ahzyuan/LLM-Apikey-Manager${NC}"
             return 1
         fi
     else
-        log_success "LAM command found at: $lam_command"
+        log_success "LAM command found at: ${PURPLE}$lam_command${NC}"
     fi
     echo
         
@@ -269,12 +274,12 @@ main() {
 
     if test_installation; then
         echo
-        log_info "To get started:"
-        log_info "1. Run 'lam init' to initialize the tool"
-        log_info "2. Run 'lam add <profile-name>' to add your first API profile"
-        log_info "3. Run 'lam help' for more information"
+        log_info "💡 To get started:"
+        log_info "1. Run ${PURPLE}'lam init'${NC} to initialize the tool"
+        log_info "2. Run ${PURPLE}'lam add <profile-name>'${NC} to add your first API profile"
+        log_info "3. Run ${PURPLE}'lam help'${NC} for more information"
         echo 
-        log_info "For detailed examples and usage, refer to: https://github.com/Ahzyuan/LLM-Apikey-Manager 🚀."
+        log_info "For detailed examples and usage, refer to: ${PURPLE}https://github.com/Ahzyuan/LLM-Apikey-Manager${NC} 🚀."
         log_info "Looking forward to your star ⭐, feedback 💬 and contributions 🤝!"
         echo
     else
