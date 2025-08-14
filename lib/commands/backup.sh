@@ -232,7 +232,7 @@ backup_list() {
     
     if [[ ! -d "$backup_dir" ]]; then
         log_info "No backups found."
-        log_info "Create your first backup with: lam backup create [name]"
+        log_info "Create your first backup with: ${PURPLE}lam backup create [name]${NC}"
         return 0
     fi
     
@@ -240,8 +240,8 @@ backup_list() {
     backups=$(find "$backup_dir" -name "*-*.tar.gz" -type f 2>/dev/null | sort -r)
     
     if [[ -z "$backups" ]]; then
-        log_info "No backups found in $backup_dir"
-        log_info "Create your first backup with: lam backup create [name]"
+        log_info "No backups found in ${PURPLE}$backup_dir${NC}"
+        log_info "Create your first backup with: ${PURPLE}lam backup create [name]${NC}"
         return 0
     fi
     
@@ -250,22 +250,16 @@ backup_list() {
     echo
     
     while IFS= read -r backup_path; do
-        local backup_file
-        backup_file=$(basename "$backup_path")
-        local backup_size
-        backup_size=$(du -h "$backup_path" 2>/dev/null | cut -f1)
-        local backup_date
-        backup_date=$(stat -c %y "$backup_path" 2>/dev/null | cut -d'.' -f1)
+        local backup_file=$(basename "$backup_path")
+        local backup_size=$(du -h "$backup_path" 2>/dev/null | cut -f1)
+        local backup_date=$(stat -c %y "$backup_path" 2>/dev/null | cut -d'.' -f1)
 
         log_purple "📦 $backup_file"
         
-        # Try to extract metadata if available
         local metadata
-        if metadata=$(tar -xzOf "$backup_path" "lam-config/backup-metadata.json" 2>/dev/null); then
-            local profile_count
-            profile_count=$(echo "$metadata" | jq -r '.profile_count' 2>/dev/null)
-            local lam_version
-            lam_version=$(echo "$metadata" | jq -r '.lam_version' 2>/dev/null)
+        if metadata=$(tar -xzOf "$backup_path" "lam-config/backup-metadata.json"); then
+            local profile_count=$(echo "$metadata" | jq -r '.profile_count')
+            local lam_version=$(echo "$metadata" | jq -r '.lam_version')
             
             log_gray " ├─ Profiles: $profile_count"
             log_gray " ├─ LAM Version: $lam_version"
