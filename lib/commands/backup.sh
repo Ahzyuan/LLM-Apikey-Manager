@@ -71,7 +71,8 @@ _interactive_selection() {
     done
     
     if [[ ${#backup_files[@]} -gt 0 ]]; then
-        IFS=$'\n' backup_files=($(printf '%s\n' "${backup_files[@]}" | sort -r))
+        mapfile -t backup_files < <(printf "%s
+" "${backup_files[@]}" | sort -r)
         unset IFS
     elif [[ ${#backup_files[@]} -eq 0 ]]; then
         log_error "No backup files found in $backup_dir"
@@ -161,7 +162,7 @@ backup_create() {
     
     local profile_count
     profile_count=$(get_profile_count)
-    if [ $profile_count -eq 0 ]; then
+    if [ "$profile_count" -eq 0 ]; then
         log_info "No profiles found. Skipping backup..." 
         exit 0
     fi
@@ -275,16 +276,22 @@ backup_list() {
     echo
     
     while IFS= read -r backup_path; do
-        local backup_file=$(basename "$backup_path")
-        local backup_size=$(du -h "$backup_path" 2>/dev/null | cut -f1)
-        local backup_date=$(stat -c %y "$backup_path" 2>/dev/null | cut -d'.' -f1)
+        local backup_file
+        backup_file=$(basename "$backup_path")
+
+        local backup_size
+        backup_size=$(du -h "$backup_path" 2>/dev/null | cut -f1)
+
+        local backup_date
+        backup_date=$(stat -c %y "$backup_path" 2>/dev/null | cut -d"." -f1)
 
         log_purple "📦 $backup_file"
         
         local metadata
         if metadata=$(tar -xzOf "$backup_path" "lam-config/backup-metadata.json"); then
-            local profile_count=$(echo "$metadata" | jq -r '.profile_count')
-            local lam_version=$(echo "$metadata" | jq -r '.lam_version')
+            local profile_count lam_version
+            profile_count=$(echo "$metadata" | jq -r '.profile_count')
+            lam_version=$(echo "$metadata" | jq -r '.lam_version')
             
             log_gray " ├─ Profiles: $profile_count"
             log_gray " ├─ LAM Version: $lam_version"
@@ -314,6 +321,9 @@ backup_info() {
     local backup_path
     
     backup_path=$(_interactive_selection "$backup_file")
+    if [[ -z "$backup_path" ]]; then
+        return 0
+    fi
     backup_file=$(basename "$backup_path")
     
     echo -e "${BLUE}Backup Information${NC}"
@@ -322,8 +332,11 @@ backup_info() {
     echo -e "${PURPLE}• Path${NC}: $backup_path"
     
     # Basic file information
-    local backup_size=$(du -h "$backup_path" 2>/dev/null | cut -f1)
-    local backup_date=$(stat -c %y "$backup_path" 2>/dev/null | cut -d'.' -f1)
+        local backup_size
+        backup_size=$(du -h "$backup_path" 2>/dev/null | cut -f1)
+
+        local backup_date
+        backup_date=$(stat -c %y "$backup_path" 2>/dev/null | cut -d"." -f1)
     
     echo -e "${PURPLE}• Created${NC}: $backup_date"
     echo -e "${PURPLE}• Size${NC}: $backup_size"
@@ -332,9 +345,10 @@ backup_info() {
     local metadata
     if metadata=$(tar -xzOf "$backup_path" "lam-config/backup-metadata.json"); then
         if echo "$metadata" | jq empty 2>/dev/null; then
-            local lam_version=$(echo "$metadata" | jq -r '.lam_version // "unknown"')
-            local ori_cfgdir=$(echo "$metadata" | jq -r '.original_config_dir // "unknown"')
-            local profile_details=$(echo "$metadata" | jq -r '.profile_details // empty')
+            local lam_version ori_cfgdir profile_details
+            lam_version=$(echo "$metadata" | jq -r '.lam_version // "unknown"')
+            ori_cfgdir=$(echo "$metadata" | jq -r '.original_config_dir // "unknown"')
+            profile_details=$(echo "$metadata" | jq -r '.profile_details // empty')
             echo -e "${PURPLE}• LAM Version${NC}: $lam_version"
             echo -e "${PURPLE}• Original Config${NC}: $ori_cfgdir"
                     
@@ -342,10 +356,12 @@ backup_info() {
                 echo 
                 echo -e "${BLUE}Profiles in Selected Backup${NC}"
                 echo "==========================="
-                local profile_count=$(echo "$profile_details" | jq length || echo 0)
+                local profile_count
+                profile_count=$(echo "$profile_details" | jq length || echo 0)
                 
                 for ((i=0; i<profile_count; i++)); do
-                    local profile=$(echo "$profile_details" | jq ".[$i]")
+                    local profile
+                    profile=$(echo "$profile_details" | jq ".[$i]")
                     
                     if [[ -n "$profile" && "$profile" != "null" ]]; then
                         local name model_name description created env_vars
@@ -387,6 +403,9 @@ backup_load() {
     local backup_path
 
     backup_path=$(_interactive_selection "$backup_file")
+    if [[ -z "$backup_path" ]]; then
+        return 0
+    fi
     backup_file=$(basename "$backup_path")
     
     # Show backup information
@@ -450,6 +469,9 @@ backup_delete() {
     local backup_path
     
     backup_path=$(_interactive_selection "$backup_file")
+    if [[ -z "$backup_path" ]]; then
+        return 0
+    fi
     backup_file=$(basename "$backup_path")
     
     # Show backup info before deletion

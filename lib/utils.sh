@@ -132,7 +132,7 @@ check_initialization() {
     
     if [[ ! -f "$DB_FILE" ]]; then
         log_error "No LAM configuration found!"
-        log_info "Please run 'lam init' first to initialize LAM."
+        log_info "Please run ${PURPLE}'lam init'${NC} first to initialize LAM."
         return 1
     fi
     
@@ -145,7 +145,7 @@ check_initialization() {
         log_info "You should need to run 'lam init' to reinitialize LAM."
         rm -rf "$DB_FILE" || {
             log_error "Failed to remove corrupted LAM configuration."
-            log_info "Please manually delete the file '$DB_FILE' before reinitializing LAM."
+            log_info "Please manually delete the file ${PURPLE}'$DB_FILE'${NC} before reinitializing LAM."
         }
         return 1
     fi
@@ -160,11 +160,12 @@ check_initialization() {
 #   None
 check_profile_arg() { 
     local name="$1"
+    local action="$2"
     
     local arg_error=false
     if [[ -z "$name" ]]; then
         log_error "Profile name is required!"
-        log_info "Usage: lam delete <profile_name>"
+        log_info "Usage: ${PURPLE}lam $action <profile_name>${NC}"
         arg_error=true
     elif ! profile_exists "$name"; then
         log_error "Profile ${PURPLE}'$name'${NC} not found!"
@@ -172,7 +173,8 @@ check_profile_arg() {
     fi
     
     if $arg_error; then
-        local profiles_cnt=$(get_profile_count)
+        local profiles_cnt
+        profiles_cnt=$(get_profile_count)
         if [[ $profiles_cnt -gt 0 ]]; then
             log_info "Available profiles:" >&2
             get_profile_names | sed 's/^/• /' >&2
@@ -256,9 +258,9 @@ validate_env_value() {
     local value="$1"
     
     # Check for dangerous characters
-    local danger_chars_list=($(grep -o '[\$\`\!\&\;\|\<\>]' <<<"$value" | sort -u))
+    local danger_chars_list
+    mapfile -t danger_chars_list < <(grep -o '[\$`!&;|<>]' <<<"$value" | sort -u)
     
-    local char
     if [[ ${#danger_chars_list[@]} -gt 0 ]]; then
         local IFS=","
         log_error "Environment variable value contains following potentially dangerous characters:"

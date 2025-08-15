@@ -35,7 +35,8 @@ init_auth_credential() {
     fi
     
     # Create verification data (known plaintext for encryption test)
-    local verification_data="LAM_AUTH_VERIFICATION:${salt}:$(date -Iseconds)"
+    local verification_data
+    verification_data="LAM_AUTH_VERIFICATION:${salt}:$(date -Iseconds)"
     
     # Encrypt verification data with master password
     local encrypted_info
@@ -53,14 +54,15 @@ init_auth_credential() {
     fi
         
     # Store in database using proper SQL escaping for base64 data
-    local sql="
+    local sql
+    sql="
         INSERT OR REPLACE INTO auth_verification (id, password_hash, encrypted_info, salt, checksum)
         VALUES (
             1, 
-            '$(echo "$password_hash" | sed "s/'/''/g")', 
-            '$(echo "$encrypted_info" | sed "s/'/''/g")', 
-            '$(echo "$salt" | sed "s/'/''/g")', 
-            '$(echo "$checksum" | sed "s/'/''/g")'
+            '${password_hash//\'/\'\'}', 
+            '${encrypted_info//\'/\'\'}', 
+            '${salt//\'/\'\'}', 
+            '${checksum//\'/\'\'}'
         );
     "
     
@@ -328,7 +330,7 @@ get_master_password() {
         fi
     fi
     
-    echo "$(sanitize_input $password)"
+    sanitize_input "$password"
 }
 
 # Get and verify master password with comprehensive authentication
@@ -387,7 +389,7 @@ get_verified_master_password() {
         # no profile and authentication credential are valid, then password is wrong
         if [[ $(execute_sql "SELECT COUNT(*) FROM profile_env_vars;" true) -eq 0 ]]; then
             log_error "Password is wrong, or your authentication credential is ${RED}deleted or has been tampered with!"
-            log_info "Now that no profile detected, if you forget your master password, you can now safely reset it by running ${PURPLE}lam init${NC}."
+            log_info "Now that no profile detected, if you forget your master password, you can now safely reset it by running ${PURPLE}'lam init'${NC}."
             exit 1
         fi
 
@@ -431,8 +433,8 @@ get_verified_master_password() {
                 log_success "Profiles removed successfully!"
                 echo >&2
                 log_info "Since no profiles are left, current operation will be aborted."
-                log_info "Please run ${PURPLE}lam add <profile-name>${NC} to add a profile."
-                log_info "Or run ${PURPLE}lam backup load${NC} to recover your previous profiles if any backup exists."
+                log_info "Please run ${PURPLE}'lam add <profile-name>'${NC} to add a profile."
+                log_info "Or run ${PURPLE}'lam backup load'${NC} to recover your previous profiles if any backup exists."
                 exit 1
             fi            
 
@@ -445,7 +447,7 @@ get_verified_master_password() {
             echo >&2
             echo 'Now, you have several options to handle this case:' >&2
             log_gray "1): try your master password again"
-            log_gray "2): remove all data(because is wrong) and reset LAM ${RED}(dangerous operation)${NC}"
+            log_gray "2): remove all data(because is corrupted) and reset LAM ${RED}(dangerous operation)${NC}"
             
             local choice
             echo -n "Enter your choice (1/2): " >&2
@@ -460,8 +462,8 @@ get_verified_master_password() {
                     ;;
                 "2")
                     echo >&2
-                    log_info "Dangerous operation!"
-                    log_info "Please type ${PURPLE}'proceed to clear and re-init'${NC} to continue: "
+                    log_warning "Dangerous operation!"
+                    echo -en "Please type ${PURPLE}'proceed to clear and re-init'${NC} to continue: " >&2
                     
                     local sure_reset
                     if ! read -r sure_reset; then
@@ -470,16 +472,22 @@ get_verified_master_password() {
                     fi
                     
                     if [[ "${sure_reset,,}" == "proceed to clear and re-init" ]]; then 
-                        rm -rf "BACKUP_DIR" && rm -rf "$DB_FILE" 2>/dev/null || {
+                        if ! rm -rf "$BACKUP_DIR"; then
+                            log_error "Failed to remove backup directory"
+                            log_info "You can manually delete the path ${PURPLE}$BACKUP_DIR${NC}"
+                        fi
+
+                        if ! rm -rf "$DB_FILE" 2>/dev/null; then
                             log_error "Failed to clear profiles"
-                            log_info "You can manually delete the path ${PURPLE}$DB_FILE${NC} and ${PURPLE}${BACKUP_DIR}${NC}."
+                            log_info "You can manually delete the path ${PURPLE}$DB_FILE${NC}."
                             log_info "Then re-init LAM by running ${PURPLE}'lam init'${NC}"
                             exit 1
-                        }
+                        fi
+
                         log_success "Cleared all profiles"
                         echo >&2
                         log_info "Since no profiles are left, current operation will be aborted."
-                        log_info "Please run ${PURPLE}lam init${NC} to re-init LAM."
+                        log_info "Please run ${PURPLE}'lam init'${NC} to re-init LAM."
                     else
                         log_info "Operation cancelled."
                         exit 1
@@ -499,7 +507,7 @@ get_verified_master_password() {
         log_warning "Password verification passed, but failed to create session"
     fi
     
-    echo "$(sanitize_input $password)"
+    sanitize_input "$password"
 }
 
 # ----------------------------------- En/Decrypt -----------------------------------

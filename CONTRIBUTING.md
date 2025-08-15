@@ -1,6 +1,6 @@
 # 🛠️ LAM Development Guide
 
-Welcome to the LAM (LLM API Manager) development guide! This document will help you understand the project architecture, contribute effectively, and maintain the high-quality standards of this security-focused tool.
+Welcome to the LAM (LLM API-key Manager) development guide! This document will help you understand the project architecture, contribute effectively, and maintain the high-quality standards of this security-focused tool.
 
 ## 🎯 Quick Start for Contributors
 

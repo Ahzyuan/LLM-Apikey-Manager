@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# LAM (LLM API Manager) Installation Script
+# LAM (LLM API-key Manager) Installation Script
 # This script installs the LAM system with all library dependencies
 
 set -euo pipefail
@@ -224,7 +224,7 @@ check_file_integrity() {
 # Globals:
 #   INSTALL_DIR, LAM_LIB_DIR: Installation directories
 install_lam() {
-    log_info "Installing LAM (LLM API Manager)..."
+    log_info "Installing LAM (LLM API-key Manager)..."
     
     
     # Remove old installation if it exists
@@ -328,8 +328,9 @@ test_installation() {
 # Globals:
 #   Uses all installation functions and variables
 main() {
-    local version=$(cat "VERSION" 2>/dev/null || echo "unknown")
-    echo "LAM (LLM API Manager) Installation"
+    local version
+    version=$(cat "VERSION" 2>/dev/null || echo "unknown")
+    echo "LAM (LLM API-key Manager) Installation"
     echo "================================="
     echo "Version: $version"
     echo

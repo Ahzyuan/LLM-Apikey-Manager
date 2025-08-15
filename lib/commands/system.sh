@@ -56,6 +56,7 @@ cmd_init() {
                     return 1
                 }
 
+                # shellcheck disable=SC2153
                 rm -rf "$BACKUP_DIR" || {
                     log_error "Failed to delete existing backups"
                     log_info "Please manually delete the profiles directory ($BACKUP_DIR) and try again."
@@ -69,15 +70,14 @@ cmd_init() {
         else
             # User remembers master password - verify it
             local old_password
-            old_password=$(
+            
+            if ! old_password=$(
                 get_verified_master_password \
                 "${BLUE}Verify your master password to re-init LAM?${NC}: "
-            )
-            
-            if [[ $? -ne 0 ]]; then
+            ); then
                 return 1
             fi
-            
+                        
             log_success "Master password verified successfully."
 
             echo
@@ -106,13 +106,13 @@ cmd_init() {
         echo
     fi
     
-    log_info "Initializing LAM (LLM API Manager)"
+    log_info "Initializing LAM (LLM API-key Manager)"
     echo
     echo "In the following process, you'll need to set up a master password."
     echo "This master password is used to encrypt, decrypt, and access all your API profiles."
     echo
     log_gray "⚠️   The master password can only be set ${PURPLE}ONCE${GRAY} during initialization"
-    log_gray "⚠️   Set a strong password (≥ 8 characters) and store it carefully, there's ${PURPLE}no${GRAY} password recovery option"
+    log_gray "⚠️   Set a strong password (8 ~ 256 characters) and store it carefully, there's ${PURPLE}no${GRAY} password recovery option"
     log_gray "⚠️   If you forget it, you'll need to ${PURPLE}re-init${GRAY} LAM and it will ${PURPLE}delete all data${NC}."
     echo
     
@@ -376,7 +376,7 @@ cmd_update() {
     if [[ -n "$wrapper_script" && -f "$wrapper_script" ]]; then
         cat > "$wrapper_script" << EOF
 #!/usr/bin/env bash
-# LAM (LLM API Manager) - Wrapper Script
+# LAM (LLM API-key Manager) - Wrapper Script
 # This script launches the main LAM executable
 
 exec "$lib_dir/lam" "\$@"
@@ -511,8 +511,10 @@ cmd_uninstall() {
     
     local backup_dir="$HOME/.lam-backups"
     if [[ -d "$backup_dir" ]]; then
+        local backup_count
+        backup_count=$(find "$backup_dir" -name "*.tar.gz" 2>/dev/null | wc -l)
+        
         echo -e "• ${PURPLE}LAM backup directory${NC}: $backup_dir"
-        local backup_count=$(find "$backup_dir" -name "*.tar.gz" 2>/dev/null | wc -l)
         log_gray "  (contains $backup_count configuration backup(s))"
         echo
     fi

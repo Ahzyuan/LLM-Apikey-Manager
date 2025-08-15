@@ -217,7 +217,7 @@ create_profile() {
     
     # Insert environment variables if any
     if [[ -n "$env_vars_json" && "$env_vars_json" != "{}" ]]; then
-        local keys values
+        local keys
         
         if ! keys=$(echo "$env_vars_json" | jq -r 'keys[]' 2>/dev/null); then
             log_error "Failed to parse environment variables JSON"
@@ -281,13 +281,13 @@ get_profile() {
     # Get profile data
     local profile_data
     profile_data=$(execute_sql "
-        SELECT id, model_name, description, created_at, last_used, updated_at
+        SELECT id, model_name, description, created_at, last_used
         FROM profiles 
         WHERE name = '$name';
     " true)
     
-    local id model_name description created_at last_used updated_at
-    IFS='|' read -r id model_name description created_at last_used updated_at <<< "$profile_data"
+    local id model_name description created_at last_used
+    IFS='|' read -r id model_name description created_at last_used <<< "$profile_data"
     
     local env_vars_data
     env_vars_data=$(execute_sql "
@@ -550,10 +550,6 @@ delete_profile() {
     profile_id=$(execute_sql "SELECT id FROM profiles WHERE name = '$escaped_name';" true 2>/dev/null)
     
     if [[ -n "$profile_id" ]]; then
-        # Count environment variables before deletion
-        local env_var_count
-        env_var_count=$(execute_sql "SELECT COUNT(*) FROM profile_env_vars WHERE profile_id = $profile_id;" true 2>/dev/null)
-        
         # Delete profile and related data in a transaction
         local delete_sql="
             BEGIN TRANSACTION;

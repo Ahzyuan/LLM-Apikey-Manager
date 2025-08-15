@@ -146,7 +146,7 @@ cmd_add() {
     fi
     
     log_success "Profile ${PURPLE}'$name'${NC} added successfully!"
-    log_info "💡 To use this profile, run: ${NC}source <(lam use $name)${NC}"
+    log_info "💡 To use this profile, run: ${PURPLE}source <(lam use $name)${NC}"
 }
 
 # List all profiles with enhanced formatting and statistics
@@ -162,7 +162,7 @@ cmd_list() {
     
     if [[ "$profile_count" -eq 0 ]]; then
         log_info "No profiles configured yet."
-        log_info "Use 'lam add <profile_name>' to add a profile."
+        log_info "Use ${PURPLE}'lam add <profile_name>'${NC} to add a profile."
         return 0
     fi
     
@@ -209,7 +209,7 @@ cmd_list() {
 cmd_show() {
     local name="$1"
     
-    check_profile_arg "$name"
+    check_profile_arg "$name" "show"
     
     local profile
     profile=$(get_profile "$name")
@@ -281,7 +281,7 @@ cmd_show() {
 cmd_use() {
     local name="$1"
     
-    check_profile_arg "$name"
+    check_profile_arg "$name" "use"
     
     local master_password
     if ! master_password=$(get_verified_master_password); then
@@ -350,7 +350,7 @@ cmd_use() {
 cmd_edit() {
     local name="$1"
     
-    check_profile_arg "$name"
+    check_profile_arg "$name" "edit"
 
     local master_password
     if ! master_password=$(get_verified_master_password); then
@@ -683,13 +683,13 @@ cmd_edit() {
                     echo 
                     log_success "Profile ${PURPLE}'$profile_name'${NC} updated successfully!"
                     if [[ "$name_changed" == true ]]; then
-                        log_info "• Profile Name: ${PURPLE}$name${NC} → ${PURPLE}$profile_name${NC}"
+                        log_info "• Profile Name: ${PURPLE}$name${NC} → ${GREEN}$profile_name${NC}"
                     fi
                     if [[ "$model_name" != "$original_model_name" ]]; then
-                        log_info "• Model Name: ${PURPLE}$original_model_name${NC} → $model_name${NC}"
+                        log_info "• Model Name: ${PURPLE}$original_model_name${NC} → ${GREEN}$model_name${NC}"
                     fi
                     if [[ "$description" != "$original_description" ]]; then
-                        log_info "• Description: ${PURPLE}$original_description${NC} → $description${NC}"
+                        log_info "• Description: ${PURPLE}$original_description${NC} → ${GREEN}$description${NC}"
                     fi
                     if [[ "$env_vars_json" != "$original_env_vars" ]]; then
                         log_info "• Environment Variables: Updated"
@@ -719,9 +719,8 @@ cmd_edit() {
 #   Uses delete_profile and validation functions
 cmd_delete() {
     local name="$1"
-    local arg_error=false
     
-    check_profile_arg "$name"
+    check_profile_arg "$name" "delete"
     
     local master_password
     if ! master_password=$(get_verified_master_password); then

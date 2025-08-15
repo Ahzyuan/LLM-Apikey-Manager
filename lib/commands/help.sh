@@ -57,7 +57,7 @@ cmd_version() {
     version_number=$(echo "$version_info" | cut -d'|' -f1)
     version_description=$(echo "$version_info" | cut -d'|' -f2)
     
-    echo "LAM (LLM API Manager) v${version_number}"
+    echo "LAM (LLM API-key Manager) v${version_number}"
     if [[ -n "$version_description" ]]; then
         echo "$version_description"
     fi
@@ -71,7 +71,7 @@ cmd_version() {
 # Globals:
 #   Uses get_version_info function
 cmd_help() {
-    echo "LAM (LLM API Manager) v$(get_version_info | cut -d'|' -f1) - Secure management of LLM API credentials"
+    echo "LAM (LLM API-key Manager) v$(get_version_info | cut -d'|' -f1) - Secure management of LLM API credentials"
     echo
     cat << 'EOF'
 USAGE:

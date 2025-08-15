@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 if [[ $EUID -eq 0 ]] && [[ -n "${SUDO_USER:-}" ]]; then
     # Running as root via sudo - use the original user's home
-    USER_HOME=$(eval echo ~$SUDO_USER)
+    USER_HOME=$(eval echo ~"$SUDO_USER")
     CONFIG_DIR="$USER_HOME/.config/lam"
 elif [[ $EUID -eq 0 ]]; then
     # Running as actual root user
@@ -22,15 +22,16 @@ else
     CONFIG_DIR="$HOME/.config/lam"
 fi
 
-DB_FILE="$CONFIG_DIR/profiles.db"   # SQLite database file 
-SESSION_FILE="$CONFIG_DIR/.session"  # store session status, age, etc
-BACKUP_DIR="$HOME/.lam-backups"
+# Export global variables for use in sourced modules
+export DB_FILE="$CONFIG_DIR/profiles.db"   # SQLite database file 
+export SESSION_FILE="$CONFIG_DIR/.session"  # store session status, age, etc
+export BACKUP_DIR="$HOME/.lam-backups"
 
-# Security constants
-readonly MAX_PASSWORD_LENGTH=256
-readonly MIN_PASSWORD_LENGTH=8
-readonly MAX_INPUT_LENGTH=4096
-readonly SESSION_TIMEOUT=1800  # 30 minutes default
+# Security constants - export for use in modules
+declare -xr MAX_PASSWORD_LENGTH=256
+declare -xr MIN_PASSWORD_LENGTH=8
+declare -xr MAX_INPUT_LENGTH=4096
+declare -xr SESSION_TIMEOUT=1800  # 30 minutes default
 
 # Load all modules
 LIB_DIR="$SCRIPT_DIR/lib"
@@ -40,6 +41,7 @@ if [[ ! -d "$LIB_DIR" ]]; then
 else
     while IFS= read -r -d '' module_file; do
         if [[ -f "$module_file" && -r "$module_file" ]]; then
+            # shellcheck disable=SC1090
             source "$module_file"
         else
             echo "Warning: Cannot read module file '$module_file'" >&2

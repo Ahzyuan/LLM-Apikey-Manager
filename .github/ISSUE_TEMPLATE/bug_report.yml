@@ -1,0 +1,122 @@
+name: Bug Report
+description: File a bug report.
+title: "[🐞 Bug]: "
+labels: ["bug"]
+type: Bug
+
+body:
+
+  - type: markdown
+    attributes:
+      value: |
+        > **Thanks for taking the time to fill out this bug report!**
+
+  - type: checkboxes
+    attributes:
+      label: Is there an existing issue or a disscusion for this?
+      description: Search for [existing issues](https://github.com/Ahzyuan/LLM-Apikey-Manager/issues/issues?q=) or [existing discussions](https://github.com/Ahzyuan/LLM-Apikey-Manager/discussions?discussions_q=) for what you encountered.
+      options:
+        - label: I have searched, and found nothing match my bug.
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: |
+        What did you do, and what did you encounter?
+        It is best to include a screenshot, gif or screen recording of your issue.
+      placeholder: Tell us what did you do and what you see!
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-expected
+    attributes:
+      label: Expected result?
+      description: Briefly describe your expected results.
+      placeholder: Describe what you want!
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Steps to Reproduce
+      description: |
+        Please describe exactly how to reproduce the bug.
+      value: |
+        <details>
+        <summary>Steps</summary>
+
+        1. 
+        2. 
+        3. 
+
+        </details>
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: Your os, like `windows 10`, `ubuntu 22.04`.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Your LAM version
+      description: Use `lam -v` to get the version.
+    validations:
+      required: true
+  
+  - type: input
+    id: shell-version
+    attributes:
+      label: Your shell type (e.g. bash, zsh, etc.) and its version
+      description: Use `bash --version` for bash or `zsh --version` for zsh to get the version.
+    validations:
+      required: true
+
+  - type: input
+    id: dependency-version
+    attributes:
+      label: Your shell type (e.g. bash, zsh, etc.) and its version
+      description: Use `bash --version` for bash or `zsh --version` for zsh to get the version.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Dependency info
+      description: |
+        Please tell us the version of these required dependencies.
+      value: |
+        1. sqlite3: <!-- replace here with the version number output by `sqlite3 --version` -->
+        2. openssl: <!-- replace here with the version number output by `openssl version` -->
+        3. curl: <!-- replace here with the version number output by `curl --version` -->
+        4. tar: <!-- replace here with the version number output by `tar --version` -->
+        5. jq: <!-- replace here with the version number output by `jq --version` -->
+    validations:
+      required: true
+
+  - type: textarea
+    id: appendix
+    attributes:
+      label: Appendix
+      description: |
+        Any addition information helping to resolve this issue is welcome. \
+        You can include code snippets, error traces, screenshots/GIFs, or other relevant materials here.
+      value: |
+        <details>
+        <summary>Details</summary>
+
+        1. 
+        2. 
+        3. 
+
+        </details>
+    validations:
+      required: false
