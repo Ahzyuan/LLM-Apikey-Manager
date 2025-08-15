@@ -355,27 +355,14 @@ backup_load() {
     
     # Confirm restoration
     log_warning "⚠️  This will replace your current LAM configuration!"
-    if [[ -d "$CONFIG_DIR" ]]; then
-        log_warning "   Your current profiles and settings will be lost."
-    fi
+    log_warning "All your current profiles and settings will be lost."
     echo
-    echo -en "${RED}Are you sure you want to restore this backup?${NC} (y/N): "
-    local confirm
-    if ! read -r confirm || [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-        log_info "Restore cancelled."
-        return 0
-    fi
-    
-    # Verify master password for security
-    echo
-    if ! get_verified_master_password; then
+    if ! get_verified_master_password "${RED}Verify your master password to restore this backup${NC}: " >/dev/null; then
         exit 1
     fi
     
     echo
-    log_info "Restoring backup..."
     
-    # Create temporary directory for extraction
     local temp_dir
     if ! temp_dir=$(mktemp -d); then
         log_error "Failed to create temporary directory"
@@ -383,43 +370,32 @@ backup_load() {
     fi
     TEMP_DIRS+=("$temp_dir")
     
-    # Extract backup
     if ! tar -xzf "$backup_path" -C "$temp_dir" 2>/dev/null; then
         log_error "Failed to extract backup archive"
         return 1
     fi
-    
-    # Remove existing configuration
-    if [[ -d "$CONFIG_DIR" ]]; then
-        rm -rf "$CONFIG_DIR"
-    fi
-    
+        
     # Restore configuration
     if [[ -d "$temp_dir/lam-config" ]]; then
-        # New format with metadata
+        if [[ -d "$CONFIG_DIR" ]]; then
+            rm -rf "$CONFIG_DIR" || {
+                log_error "Failed to remove existing configuration directory"
+                log_info "Please ensure you have permission to delete ${PURPLE}$CONFIG_DIR${NC}"
+                return 1
+            }
+        fi
         cp -r "$temp_dir/lam-config" "$CONFIG_DIR"
-        # Remove metadata file from restored config
         rm -f "$CONFIG_DIR/backup-metadata.json"
     else
-        # legacy format - try to find lam directory
-        local lam_dir
-        lam_dir=$(find "$temp_dir" -name "lam" -type d | head -1)
-        if [[ -n "$lam_dir" ]]; then
-            cp -r "$lam_dir" "$CONFIG_DIR"
-        else
-            log_error "Invalid backup format"
-            return 1
-        fi
+        log_error "Backup file corrupted and does not contain a valid configuration."
+        return 1
     fi
     
-    # Set proper permissions
     chmod 700 "$CONFIG_DIR"
     find "$CONFIG_DIR" -type f -exec chmod 600 {} \;
     
     log_success "Backup restored successfully!"
-    echo
-    log_info "Your LAM configuration has been restored from: $backup_file"
-    log_info "You may need to re-authenticate to access your profiles."
+    log_success "Your LAM configuration has been restored from: ${PURPLE}$backup_file${NC}"
 }
 
 # Delete a backup
