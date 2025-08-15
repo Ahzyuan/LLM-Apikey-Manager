@@ -139,8 +139,8 @@ cmd_add() {
         return 1
     fi
     
-    log_success "Profile '$name' added successfully!"
-    log_info "💡 To use this profile, run: source <(lam use $name)"
+    log_success "Profile ${PURPLE}'$name'${NC} added successfully!"
+    log_info "💡 To use this profile, run: ${NC}source <(lam use $name)${NC}"
 }
 
 # List all profiles with enhanced formatting
@@ -307,7 +307,8 @@ cmd_use() {
                 fi
             fi
         done <<< "$env_keys"
-
+        echo "export LLM_CURRENT_PROFILE=$name"
+        
         log_success "Profile ${PURPLE}'$name'${NC} activated!" >&2
         log_info "Variables exported: $exported_vars" >&2
     else
