@@ -251,6 +251,7 @@ cmd_update() {
         else
             log_error "Found LAM installed in unsupported directory: ${PURPLE}$script_dir${NC}"
             log_error "Operation aborted."
+            trap - EXIT
             return 1
         fi
     fi
@@ -260,6 +261,7 @@ cmd_update() {
         log_warning "⚠️  Permission Issue Detected!"
         log_info "LAM is installed system-wide, but you're running update without ${PURPLE}sudo${NC}."
         log_info "Please use ${PURPLE}'sudo lam update'${NC} to update LAM."
+        trap - EXIT
         return 1
     fi
     
@@ -268,6 +270,7 @@ cmd_update() {
     if ! temp_dir=$(mktemp -d); then
         log_error "Failed to create temporary directory"
         log_error "Please ensure you have permission to create directories in /tmp"
+        trap - EXIT
         return 1
     fi
     TEMP_DIRS+=("$temp_dir")
@@ -322,6 +325,7 @@ cmd_update() {
     
     if [[ "$current_version" == "$new_version" && "$current_version" != "unknown" ]]; then
         log_info "You already have the latest version!"
+        trap - EXIT
         return 0
     fi
     
@@ -330,6 +334,7 @@ cmd_update() {
         if ! cp "$lib_dir/lam" "$lib_dir/lam.backup"; then
             log_error "Failed to backup current LAM executable"
             log_error "Please ensure you have write permissions to ${PURPLE}$lib_dir${NC}"
+            trap - EXIT
             return 1
         fi
         log_info "Backed up current executable to: ${PURPLE}$lib_dir/lam.backup${NC}"
@@ -339,6 +344,7 @@ cmd_update() {
         if ! cp "$wrapper_script" "$wrapper_script.backup"; then
             log_error "Failed to backup wrapper script"
             log_error "Please ensure you have permission to write to: ${PURPLE}$(dirname "$wrapper_script")${NC}"
+            trap - EXIT
             return 1
         fi
         log_info "Backed up wrapper script to: ${PURPLE}$wrapper_script.backup${NC}"

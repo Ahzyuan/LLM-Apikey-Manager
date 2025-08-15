@@ -1,2 +1,2 @@
-0.1.0
-Complete basic functions and build the project framework
+0.1.1
+Remove trap handler upon function return normally in update command
