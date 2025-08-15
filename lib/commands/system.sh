@@ -302,9 +302,11 @@ show_manual_update_instructions() {
 
 # Uninstall LAM with complete cleanup
 cmd_uninstall() {
-    local master_password
-    if ! master_password=$(get_verified_master_password); then
-        return 1
+    if check_initialization 2>/dev/null; then
+        local master_password
+        if ! master_password=$(get_verified_master_password); then
+            return 1
+        fi
     fi
     
     # Find installation locations
