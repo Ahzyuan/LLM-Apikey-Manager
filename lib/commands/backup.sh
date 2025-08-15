@@ -357,7 +357,7 @@ backup_load() {
     log_warning "⚠️  This will replace your current LAM configuration!"
     log_warning "All your current profiles and settings will be lost."
     echo
-    if ! get_verified_master_password "${RED}Verify your master password to restore this backup${NC}: " >/dev/null; then
+    if ! get_verified_master_password "${GRAY}Verify your ${RED}master password${GRAY} to restore this backup: ${NC}" >/dev/null; then
         exit 1
     fi
     
@@ -411,16 +411,7 @@ backup_delete() {
     echo
     
     log_warning "⚠️  This action cannot be undone!"
-    echo -en "${RED}Are you sure you want to delete this backup?${NC} (y/N): "
-    local confirm
-    if ! read -r confirm || [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-        log_info "Deletion cancelled."
-        return 0
-    fi
-    
-    # Verify master password for security
-    echo
-    if ! get_verified_master_password; then
+    if ! get_verified_master_password "${GRAY}Verify your ${RED}master password${GRAY} to delete this backup: ${NC}" >/dev/null; then
         exit 1
     fi
     
@@ -429,8 +420,7 @@ backup_delete() {
     else
         log_error "Failed to delete backup"
         log_info "Please check your permissions and try again."
-        log_info "Or you can manually delete it by running:"
-        log_gray "  rm -f $backup_path"
+        log_info "Or you can manually delete it by running ${PURPLE}'rm -f $backup_path'${NC}"
         exit 1
     fi
 }
