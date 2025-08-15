@@ -246,6 +246,9 @@ git checkout -b docs/improve-installation-guide
 <details>
 <summary>3. 💻 Development Phase</summary>
 
+> [!TIP]
+> After development, don't forget to add your `name`/`github ID` to `CONTRIBUTORS.md`. That is a list of all contributors.
+
 ```bash
 # Install development environment
 ./install.sh
