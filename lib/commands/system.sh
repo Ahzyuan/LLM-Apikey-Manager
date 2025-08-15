@@ -390,14 +390,14 @@ EOF
         chmod +x "$wrapper_script"
     fi
     
-    echo
+    echoGRAY
     log_success "LAM updated successfully!"
     log_success "Updated from ${PURPLE}$current_version${NC} to ${PURPLE}$new_version${NC}"
     log_success "All modules and dependencies have been updated"
     echo
     log_info "💡 ${BLUE}Next Steps${NC}:"
-    log_gray "• Restart your terminal or run ${PURPLE}'hash -r'${NC} to refresh the command cache"
-    log_gray "• Run ${PURPLE}'lam version'${NC} to verify the new version"
+    log_gray "• Restart your terminal or run ${PURPLE}'hash -r'${GRAY} to refresh the command cache"
+    log_gray "• Run ${PURPLE}'lam version'${GRAY} to verify the new version"
     log_gray "• Your profiles and configuration remain unchanged"
     
     # Clear trap on successful completion
