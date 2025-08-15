@@ -194,14 +194,54 @@ cmd_status() {
 # Update LAM with enhanced security
 cmd_update() {
     log_info "Checking for LAM updates..."
+    echo
     
-    # Check if we have curl available
-    if ! command -v curl &> /dev/null; then
-        log_error "curl is required for automatic updates"
-        log_info "Please install it: sudo apt-get install curl"
-        echo
-        log_info "Alternative: Manual update process"
-        show_manual_update_instructions
+    # Set up trap for update failure - prompt manual update
+    trap 'echo
+          manual_update_instructions
+          echo
+          log_info "If you continue to experience issues, please report them at: ${PURPLE}https://github.com/Ahzyuan/LLM-Apikey-Manager/issues${NC}"
+    ' EXIT
+    
+    check_dependencies
+    
+    # Determine current installation type and paths
+    local current_script script_dir wrapper_script lib_dir 
+    local is_system_install=false
+    current_script=$(readlink -f "$0")
+    script_dir=$(dirname "$current_script")
+    
+    if [[ "$current_script" == *"/bin/lam" ]]; then
+        # This is the wrapper script
+        wrapper_script="$current_script"
+        # Find the actual installation directory
+        if [[ "$current_script" == "/usr/local/bin/lam" ]]; then
+            lib_dir="/usr/local/share/lam"
+            is_system_install=true
+        elif [[ "$current_script" == "$HOME/.local/bin/lam" ]]; then
+            lib_dir="$HOME/.local/share/lam"
+        fi
+    else
+        # This is the main executable, find wrapper
+        if [[ "$script_dir" == "/usr/local/share/lam" ]]; then
+            wrapper_script="/usr/local/bin/lam"
+            lib_dir="/usr/local/share/lam"
+            is_system_install=true
+        elif [[ "$script_dir" == "$HOME/.local/share/lam" ]]; then
+            wrapper_script="$HOME/.local/bin/lam"
+            lib_dir="$HOME/.local/share/lam"
+        else
+            log_error "Found LAM installed in unsupported directory: ${PURPLE}$script_dir${NC}"
+            log_error "Operation aborted."
+            return 1
+        fi
+    fi
+
+    # Check permissions for system-wide installation
+    if $is_system_install && [[ $EUID -ne 0 ]]; then
+        log_warning "⚠️  Permission Issue Detected!"
+        log_info "LAM is installed system-wide, but you're running update without ${PURPLE}sudo${NC}."
+        log_info "Please use ${PURPLE}'sudo lam update'${NC} to update LAM."
         return 1
     fi
     
@@ -209,95 +249,155 @@ cmd_update() {
     local temp_dir
     if ! temp_dir=$(mktemp -d); then
         log_error "Failed to create temporary directory"
+        log_error "Please ensure you have permission to create directories in /tmp"
         return 1
     fi
     TEMP_DIRS+=("$temp_dir")
+        
+    # Download the latest release tarball from GitHub
+    local github_url="https://github.com/Ahzyuan/LLM-Apikey-Manager/archive/refs/heads/master.tar.gz"
+    if ! curl --max-time 5 -sL "$github_url" -o "$temp_dir/lam-latest.tar.gz"; then
+        log_error "Failed to download update from GitHub"
+        log_error "This might be due to network restrictions or GitHub access issues"
+        echo
+        log_info "Please try again later or manually update by following these instructions:"
+        exit 1
+    fi
     
-    log_info "Downloading latest version..."
+    # Extract the downloaded archive
+    if ! tar -xzf "$temp_dir/lam-latest.tar.gz" -C "$temp_dir" 2>/dev/null; then
+        log_error "Failed to extract update package"
+        log_error "Your system might not have enough disk space or the downloaded archive is corrupted"
+        echo
+        log_info "Please try again later or manually update by following these instructions:"
+        exit 1
+    fi
     
-    # Download the latest version from GitHub
-    if curl -sL "https://raw.githubusercontent.com/Ahzyuan/LLM-Apikey-Manager/lam" -o "$temp_dir/lam"; then
-        # Verify the downloaded file
-        if [[ -f "$temp_dir/lam" ]] && [[ -s "$temp_dir/lam" ]] && head -1 "$temp_dir/lam" | grep -q "#!/usr/bin/env bash"; then
-            # Extract version from downloaded file
-            local new_version
-            new_version=$(grep "^# Version:" "$temp_dir/lam" | head -1 | sed 's/.*Version: //' | sed 's/ .*//')
-            
-            # Get current version
-            local current_version
-            current_version=$(grep "^# Version:" "$0" | head -1 | sed 's/.*Version: //' | sed 's/ .*//')
-            
-            log_info "Current version: $current_version"
-            log_info "Latest version: $new_version"
-            
-            # Check if update is needed
-            if [[ "$current_version" == "$new_version" ]]; then
-                log_info "You already have the latest version!"
-                return 0
-            fi
-            
-            # Find current script location
-            local current_script
-            current_script=$(readlink -f "$0")
-            
-            # Backup current version
-            if ! cp "$current_script" "$current_script.backup"; then
-                log_error "Failed to backup current version"
-                return 1
-            fi
-            log_info "Backed up current version to: $current_script.backup"
-            
-            # Replace with new version
-            if ! cp "$temp_dir/lam" "$current_script"; then
-                log_error "Failed to install new version"
-                # Restore backup
-                cp "$current_script.backup" "$current_script"
-                return 1
-            fi
-            
-            # Set executable permissions
-            chmod +x "$current_script"
-            
-            log_success "LAM updated successfully!"
-            log_info "Updated from $current_version to $new_version"
-            log_info "Restart your terminal or run 'hash -r' to use the new version"
-            
-        else
-            log_error "Downloaded file appears to be corrupted"
-            show_manual_update_instructions
+    local extracted_dir
+    extracted_dir=$(find "$temp_dir" -name "LLM-Apikey-Manager-*" -type d | head -1)
+    if [[ ! -d "$extracted_dir" ]]; then
+        log_error "Could not find extracted LAM directory"
+        echo
+        log_info "Please try again later or manually update by following these instructions:"
+        exit 1
+    fi
+    
+    # Validate the downloaded version
+    if [[ ! -f "$extracted_dir/lam" ]] || [[ ! -d "$extracted_dir/lib" ]]; then
+        log_error "Downloaded package appears to be incomplete or corrupted"
+        log_error "Missing required files: lam executable or lib directory"
+        echo
+        log_info "Please try again later or manually update by following these instructions:"
+        exit 1
+    fi
+        
+    local current_version new_version
+    current_version=$(get_version_info | cut -d'|' -f1)
+    if [[ -f "$extracted_dir/VERSION" ]]; then
+        new_version=$(head -1 "$extracted_dir/VERSION" | tr -d '[:space:]')
+    else
+        new_version="unknown"
+    fi
+    
+    log_info "Current version: ${PURPLE}$current_version${NC}"
+    log_info "Latest version: ${PURPLE}$new_version${NC}"
+    
+    if [[ "$current_version" == "$new_version" && "$current_version" != "unknown" ]]; then
+        log_info "You already have the latest version!"
+        return 0
+    fi
+    
+    # Backup current installation
+    if [[ -f "$lib_dir/lam" ]]; then
+        if ! cp "$lib_dir/lam" "$lib_dir/lam.backup"; then
+            log_error "Failed to backup current LAM executable"
+            log_error "Please ensure you have write permissions to ${PURPLE}$lib_dir${NC}"
             return 1
         fi
-    else
-        log_error "Failed to download update from GitHub"
-        log_info "This might be due to network restrictions or GitHub access issues"
-        echo
-        show_manual_update_instructions
-        return 1
+        log_info "Backed up current executable to: ${PURPLE}$lib_dir/lam.backup${NC}"
     fi
+    
+    if [[ -n "$wrapper_script" && -f "$wrapper_script" ]]; then
+        if ! cp "$wrapper_script" "$wrapper_script.backup"; then
+            log_error "Failed to backup wrapper script"
+            log_error "Please ensure you have permission to write to: ${PURPLE}$(dirname "$wrapper_script")${NC}"
+            return 1
+        fi
+        log_info "Backed up wrapper script to: ${PURPLE}$wrapper_script.backup${NC}"
+    fi
+    
+    # Install new version
+    echo
+    log_info "Updating LAM..."
+    
+    if ! cp "$extracted_dir/lam" "$lib_dir/lam"; then
+        log_error "Failed to install new LAM executable"
+        # Restore backup
+        [[ -f "$lib_dir/lam.backup" ]] && cp "$lib_dir/lam.backup" "$lib_dir/lam"
+        echo
+        log_info "Please try again later or manually update by following these instructions:"
+        exit 1
+    fi
+    
+    if ! cp -r "$extracted_dir/lib"/* "$lib_dir/lib/"; then
+        log_error "Failed to install new library modules"
+        # Restore backup
+        [[ -f "$lib_dir/lam.backup" ]] && cp "$lib_dir/lam.backup" "$lib_dir/lam"
+        echo
+        log_info "Please try again later or manually update by following these instructions:"
+        exit 1
+    fi
+    
+    if [[ -f "$extracted_dir/VERSION" ]]; then
+        cp "$extracted_dir/VERSION" "$lib_dir/VERSION" 2>/dev/null || true
+    fi
+    
+    chmod +x "$lib_dir/lam"
+    find "$lib_dir/lib" -name "*.sh" -type f -exec chmod +x {} \;
+    
+    if [[ -n "$wrapper_script" && -f "$wrapper_script" ]]; then
+        cat > "$wrapper_script" << EOF
+#!/usr/bin/env bash
+# LAM (LLM API Manager) - Wrapper Script
+# This script launches the main LAM executable
+
+exec "$lib_dir/lam" "\$@"
+EOF
+        chmod +x "$wrapper_script"
+    fi
+    
+    echo
+    log_success "LAM updated successfully!"
+    log_success "Updated from ${PURPLE}$current_version${NC} to ${PURPLE}$new_version${NC}"
+    log_success "All modules and dependencies have been updated"
+    echo
+    log_info "💡 ${BLUE}Next Steps${NC}:"
+    log_gray "• Restart your terminal or run ${PURPLE}'hash -r'${NC} to refresh the command cache"
+    log_gray "• Run ${PURPLE}'lam version'${NC} to verify the new version"
+    log_gray "• Your profiles and configuration remain unchanged"
+    
+    # Clear trap on successful completion
+    trap - EXIT
 }
 
 # Show manual update instructions
-show_manual_update_instructions() {
-    log_info "Manual Update Process:"
-    echo "====================="
+manual_update_instructions() {
+    echo -e "${BLUE}1. Download LAM source code from GitHub:${NC}"
+    log_gray "   • Visit: ${PURPLE}https://github.com/Ahzyuan/LLM-Apikey-Manager${NC}"
+    log_gray "   • Click ${PURPLE}'Code' → 'Download ZIP'${NC} OR"
+    log_gray "   • Clone: ${PURPLE}git clone https://github.com/Ahzyuan/LLM-Apikey-Manager.git${NC}"
     echo
-    log_info "1. Download LAM source code from GitHub:"
-    log_gray "   • Visit: https://github.com/Ahzyuan/LLM-Apikey-Manager"
-    log_gray "   • Click 'Code' → 'Download ZIP' OR"
-    log_gray "   • Clone: git clone https://github.com/Ahzyuan/LLM-Apikey-Manager.git"
+    echo -e "${BLUE}2. Extract and navigate to the project directory:${NC}"
+    log_gray "   • ${PURPLE}unzip LLM-Apikey-Manager-main.zip && cd LLM-Apikey-Manager-main${NC}  OR"
+    log_gray "   • ${PURPLE}cd LLM-Apikey-Manager${NC}"
     echo
-    log_info "2. Extract and navigate to the project directory:"
-    log_gray "   • unzip lam-main.zip && cd lam-main  OR"
-    log_gray "   • cd lam"
+    echo -e "${BLUE}3. Run the installation script:${NC}"
+    log_gray "   • System-wide installation: ${PURPLE}sudo bash install.sh${NC}"
+    log_gray "   • User-local installation: ${PURPLE}bash install.sh${NC}"
     echo
-    log_info "3. Run the manual update script:"
-    log_gray "   • ./version_update.sh"
-    echo
-    log_gray "The version_update.sh script will:"
-    log_gray "• Find your current LAM installation"
-    log_gray "• Backup the current version"
-    log_gray "• Install the new version"
-    log_gray "• Verify the installation"
+    echo -e "${BLUE}4. Verify the installation:${NC}"
+    log_gray "   • Check LAM version: ${PURPLE}lam version${NC}"
+    log_gray "   • Your existing profiles and configuration will be preserved"
 }
 
 # Uninstall LAM with complete cleanup
