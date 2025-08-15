@@ -12,26 +12,68 @@ BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 NC='\033[0m'
 
+# Log informational message during installation
+# Arguments:
+#   $1 - message: Message to log
+# Returns:
+#   Always returns 0
+# Globals:
+#   BLUE, NC: Color codes for formatting
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
 
+# Log success message during installation
+# Arguments:
+#   $1 - message: Success message to log
+# Returns:
+#   Always returns 0
+# Globals:
+#   GREEN, NC: Color codes for formatting
 log_success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
 
+# Log warning message during installation
+# Arguments:
+#   $1 - message: Warning message to log
+# Returns:
+#   Always returns 0
+# Globals:
+#   YELLOW, NC: Color codes for formatting
 log_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
+# Log error message during installation
+# Arguments:
+#   $1 - message: Error message to log
+# Returns:
+#   Always returns 0
+# Globals:
+#   RED, NC: Color codes for formatting
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
+# Log highlighted message during installation
+# Arguments:
+#   $1 - message: Message to log in purple
+# Returns:
+#   Always returns 0
+# Globals:
+#   PURPLE, NC: Color codes for formatting
 log_purple() {
     echo -e "${PURPLE}$1${NC}" >&2
 }
 
+# Check for required system dependencies and versions
+# Arguments:
+#   None
+# Returns:
+#   0 if all dependencies are satisfied, 1 if missing dependencies
+# Globals:
+#   None
 check_dependencies() {
     local deps=("sqlite3" "openssl" "curl" "tar" "jq")
     local missing_deps=()
@@ -71,7 +113,13 @@ check_dependencies() {
     log_success "All dependencies are installed"
 }
 
-# Determine installation scope and directories
+# Determine installation scope and set directory variables
+# Arguments:
+#   None
+# Returns:
+#   Always returns 0
+# Globals:
+#   INSTALL_DIR, LAM_LIB_DIR: Set based on user privileges
 check_install_scope() {
     if [[ $EUID -eq 0 ]]; then
         # Running as root - system-wide installation
@@ -97,7 +145,13 @@ check_install_scope() {
     fi
 }
 
-# Validate modular LAM installation files
+# Validate that all required LAM files are present for installation
+# Arguments:
+#   None
+# Returns:
+#   0 if all files are present, 1 if missing files
+# Globals:
+#   None
 check_file_integrity() {
     log_info "Checking for required files for LAM installation..."
     required_modules=("security.sh" "config.sh" "utils.sh")
@@ -162,6 +216,13 @@ check_file_integrity() {
     log_success "All required files found for installation"
 }
 
+# Install LAM executable and library files to system
+# Arguments:
+#   None
+# Returns:
+#   0 on successful installation, 1 on failure
+# Globals:
+#   INSTALL_DIR, LAM_LIB_DIR: Installation directories
 install_lam() {
     log_info "Installing LAM (LLM API Manager)..."
     
@@ -213,6 +274,13 @@ EOF
     log_success "LAM libraries installed to ${PURPLE}$lam_install_dir${NC}"
 }
 
+# Test LAM installation by running basic commands
+# Arguments:
+#   None
+# Returns:
+#   0 if installation tests pass, 1 if tests fail
+# Globals:
+#   INSTALL_DIR: Installation directory for testing
 test_installation() {
     log_info "Testing LAM installation..."
     
@@ -252,6 +320,13 @@ test_installation() {
     return 0
 }
 
+# Main installation function that orchestrates the entire process
+# Arguments:
+#   $@ - All command line arguments passed to installer
+# Returns:
+#   0 on successful installation, 1 on failure
+# Globals:
+#   Uses all installation functions and variables
 main() {
     local version=$(cat "VERSION" 2>/dev/null || echo "unknown")
     echo "LAM (LLM API Manager) Installation"

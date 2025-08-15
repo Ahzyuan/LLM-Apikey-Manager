@@ -15,26 +15,68 @@ declare -a TEMP_FILES=()
 declare -a TEMP_DIRS=()
 
 # --------------------------------- Color Log ---------------------------------
+# Log informational message with blue color
+# Arguments:
+#   $1 - message: The message to log
+# Returns:
+#   Always returns 0
+# Globals:
+#   BLUE, NC: Color codes for formatting
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1" >&2
 }
 
+# Log success message with green color
+# Arguments:
+#   $1 - message: The success message to log
+# Returns:
+#   Always returns 0
+# Globals:
+#   GREEN, NC: Color codes for formatting
 log_success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1" >&2
 }
 
+# Log warning message with yellow color
+# Arguments:
+#   $1 - message: The warning message to log
+# Returns:
+#   Always returns 0
+# Globals:
+#   YELLOW, NC: Color codes for formatting
 log_warning() {
     echo -e "${YELLOW}[WARNING]${NC} $1" >&2
 }
 
+# Log error message with red color
+# Arguments:
+#   $1 - message: The error message to log
+# Returns:
+#   Always returns 0
+# Globals:
+#   RED, NC: Color codes for formatting
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
+# Log message with gray color (for secondary information)
+# Arguments:
+#   $1 - message: The message to log in gray
+# Returns:
+#   Always returns 0
+# Globals:
+#   GRAY, NC: Color codes for formatting
 log_gray() {
     echo -e "${GRAY}$1${NC}" >&2
 }
 
+# Log message with purple color (for highlights)
+# Arguments:
+#   $1 - message: The message to log in purple
+# Returns:
+#   Always returns 0
+# Globals:
+#   PURPLE, NC: Color codes for formatting
 log_purple() {
     echo -e "${PURPLE}$1${NC}" >&2
 }
@@ -53,6 +95,13 @@ cleanup_temp_resources() {
     TEMP_DIRS=()
 }
 
+# Check if all required system dependencies are installed
+# Arguments:
+#   None
+# Returns:
+#   0 if all dependencies are available, 1 if any are missing
+# Globals:
+#   None
 check_dependencies() {
     local dependencies=("sqlite3" "openssl" "curl" "tar" "jq")
     local missing_deps=()
@@ -72,7 +121,13 @@ check_dependencies() {
     fi
 }
 
-# Check if LAM is initialized
+# Check if LAM has been properly initialized (database exists)
+# Arguments:
+#   None
+# Returns:
+#   0 if LAM is initialized, 1 if not initialized
+# Globals:
+#   DB_FILE: Path to the SQLite database file
 check_initialization() {
     
     if [[ ! -f "$DB_FILE" ]]; then
@@ -96,6 +151,13 @@ check_initialization() {
     fi
 }
 
+# Check if profile argument is provided and valid
+# Arguments:
+#   $1 - profile_name: Name of the profile to validate
+# Returns:
+#   0 if profile name is valid, 1 if invalid or missing
+# Globals:
+#   None
 check_profile_arg() { 
     local name="$1"
     
@@ -123,7 +185,15 @@ check_profile_arg() {
 }
 
 # -------------------------------- Input Validation --------------------------------
-# Secure input validation functions
+
+# Validate input length against security limits
+# Arguments:
+#   $1 - input: The input string to validate
+#   $2 - max_length: Maximum allowed length (optional, uses MAX_INPUT_LENGTH if not provided)
+# Returns:
+#   0 if input length is valid, 1 if too long
+# Globals:
+#   MAX_INPUT_LENGTH: Global maximum input length constant
 validate_input_length() {
     local input="$1"
     local max_length="${2:-$MAX_INPUT_LENGTH}"
@@ -136,6 +206,12 @@ validate_input_length() {
 }
 
 # Sanitize input to prevent injection attacks
+# Arguments:
+#   $1 - input: The input string to sanitize
+# Returns:
+#   0 on success, outputs sanitized string to stdout
+# Globals:
+#   None
 sanitize_input() {
     local input="$1"
     # Remove null bytes, carriage returns, and newlines
@@ -144,6 +220,12 @@ sanitize_input() {
 }
 
 # Validate environment variable key format
+# Arguments:
+#   $1 - key: The environment variable key to validate
+# Returns:
+#   0 if key format is valid, 1 if invalid
+# Globals:
+#   None
 validate_env_key() {
     local key="$1"
     
@@ -164,6 +246,12 @@ validate_env_key() {
 }
 
 # Validate environment variable value
+# Arguments:
+#   $1 - value: The environment variable value to validate
+# Returns:
+#   0 if value is valid, 1 if invalid or too long
+# Globals:
+#   MAX_INPUT_LENGTH: Maximum allowed value length
 validate_env_value() {
     local value="$1"
     
@@ -188,7 +276,14 @@ validate_env_value() {
 }
 
 # -------------------------------------- Misc -------------------------------------
-# Create secure temporary file
+
+# Create a secure temporary file with proper permissions
+# Arguments:
+#   None
+# Returns:
+#   0 on success, outputs temp file path to stdout; 1 on failure
+# Globals:
+#   TEMP_FILES: Array to track temporary files for cleanup
 create_temp_file() {
     local temp_file
     temp_file=$(mktemp) || {
@@ -209,9 +304,14 @@ create_temp_file() {
     echo "$temp_file"
 }
 
-# Collect, validate and dump environment variable input to array 
-# Usage: collect_env_var "field_name" "prompt" "master_password" "env vars collector" "true"(required) "true"(mask_value) "type"
-# Returns: env vars collector json string or empty string
+# Interactively collect environment variable from user
+# Arguments:
+#   $1 - key: The environment variable key
+#   $2 - current_value: Current value (optional, for editing)
+# Returns:
+#   0 on success, outputs JSON object to stdout; 1 on failure
+# Globals:
+#   None
 collect_env_var() {
     local field_name="$1"
     local prompt="$2"

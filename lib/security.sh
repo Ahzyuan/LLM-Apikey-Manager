@@ -5,7 +5,13 @@
 
 # ----------------------------------- Auth Verification -----------------------------------
 
-# Store master password verification in database
+# Initialize authentication credential storage in database
+# Arguments:
+#   $1 - password: Master password to create authentication for
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses execute_sql function and database operations
 init_auth_credential() {
     local password="$1"
     
@@ -66,7 +72,13 @@ init_auth_credential() {
     return 0
 }
 
-# Verify master password by decrypting existing profile data
+# Verify master password by attempting to decrypt existing profile data
+# Arguments:
+#   $1 - password: Master password to verify
+# Returns:
+#   0 if password can decrypt data, 1 if verification fails
+# Globals:
+#   Uses execute_sql and decrypt_data functions
 verify_profile_decryption() {
     local password="$1"
 
@@ -108,7 +120,13 @@ verify_profile_decryption() {
     return 0
 }
 
-# Verify authentication credential
+# Verify authentication credential using multiple security layers
+# Arguments:
+#   $1 - password: Master password to verify
+# Returns:
+#   0 if all verification layers pass, 1 if any layer fails
+# Globals:
+#   Uses execute_sql and decrypt_data functions
 verify_auth_credential() {
     local password="$1"
     local stored_hash stored_encrypted stored_salt 
@@ -195,6 +213,12 @@ verify_auth_credential() {
 }
 
 # Authenticate user identity when master password is forgotten
+# Arguments:
+#   None
+# Returns:
+#   0 if user authentication succeeds, 1 if authentication fails
+# Globals:
+#   CONFIG_DIR: Configuration directory for file-based verification
 authenticate_user_passwd() {
     local current_user
     current_user=$(whoami)
@@ -244,7 +268,14 @@ authenticate_user_passwd() {
 
 # ----------------------------------- Password Retrieval ----------------------------------- 
 
-# Secure password reading function
+# Securely read master password from user with validation
+# Arguments:
+#   $1 - prompt: Custom prompt message (optional)
+#   $2 - length_verified: Skip length validation if "true" (optional)
+# Returns:
+#   0 on success, outputs password to stdout; 1 on failure
+# Globals:
+#   MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH: Password length limits
 get_master_password() {
     local prompt="${1:-Enter master password: }"
     local password
@@ -300,7 +331,13 @@ get_master_password() {
     echo "$(sanitize_input $password)"
 }
 
-# Get and verify master password
+# Get and verify master password with comprehensive authentication
+# Arguments:
+#   $1 - prompt: Custom prompt message (optional)
+# Returns:
+#   0 on success, outputs verified password to stdout; 1 on failure
+# Globals:
+#   Uses multiple verification functions and session management
 get_verified_master_password() {
     local password
     local prompt="${1:-Enter master password: }"
@@ -467,7 +504,14 @@ get_verified_master_password() {
 
 # ----------------------------------- En/Decrypt -----------------------------------
 
-# Encrypt data using AES-256-CBC
+# Encrypt data using AES-256-CBC with PBKDF2 key derivation
+# Arguments:
+#   $1 - data: Plain text data to encrypt
+#   $2 - password: Password for encryption
+# Returns:
+#   0 on success, outputs base64 encrypted data to stdout; 1 on failure
+# Globals:
+#   None
 encrypt_data() {
     local data="$1"
     local password="$2"
@@ -484,7 +528,14 @@ encrypt_data() {
     }
 }
 
-# Decrypt data using AES-256-CBC
+# Decrypt data using AES-256-CBC with PBKDF2 key derivation
+# Arguments:
+#   $1 - encrypted_data: Base64 encrypted data to decrypt
+#   $2 - password: Password for decryption
+# Returns:
+#   0 on success, outputs decrypted data to stdout; 1 on failure
+# Globals:
+#   None
 decrypt_data() {
     local encrypted_data="$1"
     local password="$2"
@@ -503,7 +554,14 @@ decrypt_data() {
 
 # ----------------------------------- Session Mangement -----------------------------------
 
-# Check if session is valid
+# Check if current session is still valid based on timeout
+# Arguments:
+#   None
+# Returns:
+#   0 if session is valid, 1 if expired or not found
+# Globals:
+#   SESSION_FILE: Path to session file
+#   SESSION_TIMEOUT: Session timeout in seconds
 is_session_valid() {
     [[ -f "$SESSION_FILE" ]] || return 1
     
@@ -518,7 +576,13 @@ is_session_valid() {
     [[ $time_diff -lt $SESSION_TIMEOUT ]]
 }
 
-# Create session with atomic file operations
+# Create a new session with encrypted password hash
+# Arguments:
+#   $1 - password: Master password to create session for
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   SESSION_FILE: Path to session file
 create_session() {
     local password="$1"
     
@@ -562,6 +626,15 @@ create_session() {
 
 # ------------------------------------ Renew Password -----------------------------------
 
+# Re-encrypt a profile with new password (for password changes)
+# Arguments:
+#   $1 - profile_name: Name of profile to re-encrypt
+#   $2 - old_password: Current password
+#   $3 - new_password: New password
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses database operations and encryption functions
 reencrypt_profile() { 
     local profile_name="$1"
     local old_password="$2"
@@ -639,6 +712,15 @@ reencrypt_profile() {
     done <<< "$env_vars_data"
 }
 
+# Re-encrypt backup file with new password
+# Arguments:
+#   $1 - backup_file: Path to backup file
+#   $2 - old_password: Current password
+#   $3 - new_password: New password
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   TEMP_DIRS: For temporary backup processing
 reencrypt_backup() {
     local backup_file="$1"
     local old_password="$2"
@@ -730,6 +812,12 @@ reencrypt_backup() {
 }
 
 # Renew master password while preserving all encrypted data
+# Arguments:
+#   None (prompts user for old and new passwords)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses multiple functions for password verification and re-encryption
 renew_master_password() {
     local old_password="$1"
     

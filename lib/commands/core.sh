@@ -3,7 +3,13 @@
 # LAM Core Commands Module
 # Profile management: add, list, show, use, edit, delete
 
-# Add new API profile with enhanced validation
+# Add new API profile with interactive prompts
+# Arguments:
+#   $1 - profile_name: Name for the new profile (optional, prompts if not provided)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses multiple functions for profile creation and validation
 cmd_add() {
     local name="$1"
     local env_vars="{}"
@@ -143,7 +149,13 @@ cmd_add() {
     log_info "💡 To use this profile, run: ${NC}source <(lam use $name)${NC}"
 }
 
-# List all profiles with enhanced formatting
+# List all profiles with enhanced formatting and statistics
+# Arguments:
+#   None
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses get_all_profiles and formatting functions
 cmd_list() {
     local profile_count
     profile_count=$(get_profile_count)
@@ -187,7 +199,13 @@ cmd_list() {
     echo
 }
 
-# Show specific profile with secure masking
+# Show detailed information for a specific profile
+# Arguments:
+#   $1 - profile_name: Name of profile to display (optional, prompts if not provided)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses get_profile and formatting functions
 cmd_show() {
     local name="$1"
     
@@ -253,7 +271,13 @@ cmd_show() {
     echo 
 }
 
-# Export profile to environment variables
+# Export profile environment variables to current shell
+# Arguments:
+#   $1 - profile_name: Name of profile to use (optional, prompts if not provided)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses get_profile and decrypt_data functions
 cmd_use() {
     local name="$1"
     
@@ -316,7 +340,13 @@ cmd_use() {
     fi
 }
 
-# Edit existing configuration with enhanced validation
+# Edit existing profile with interactive prompts
+# Arguments:
+#   $1 - profile_name: Name of profile to edit (optional, prompts if not provided)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses get_profile, update_profile and related functions
 cmd_edit() {
     local name="$1"
     
@@ -680,7 +710,13 @@ cmd_edit() {
     done
 }
 
-# Delete profile with enhanced validation
+# Delete profile with enhanced validation and confirmation
+# Arguments:
+#   $1 - profile_name: Name of profile to delete (optional, prompts if not provided)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses delete_profile and validation functions
 cmd_delete() {
     local name="$1"
     local arg_error=false

@@ -50,7 +50,13 @@ fi
 # Set up trap for gc & error trace back
 trap cleanup_temp_resources EXIT # trap for cleanup on exit
 
-# Main function with enhanced error handling
+# Main entry point function with enhanced error handling
+# Arguments:
+#   $@ - All command line arguments passed to the script
+# Returns:
+#   0 on successful command execution, 1 on error
+# Globals:
+#   Uses all global configuration variables (CONFIG_DIR, DB_FILE, etc.)
 main() {
     
     check_dependencies

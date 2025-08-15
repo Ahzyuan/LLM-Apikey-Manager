@@ -3,7 +3,13 @@
 # LAM System Related Commands
 # Functions: init, status, update, uninstall
 
-# Initialize the tool with enhanced security
+# Initialize or reset LAM with master password setup
+# Arguments:
+#   None (prompts user for password input)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses init_config_dir, init_database, and authentication functions
 cmd_init() {
     # Check if already initialized
     init_config_dir || return 1
@@ -139,7 +145,13 @@ cmd_init() {
     log_info "💡 You can now add API profiles using: ${PURPLE}lam add <profile_name>${NC}"
 }
 
-# Show LAM status and statistics
+# Display LAM status, statistics, and system information
+# Arguments:
+#   None
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses various status and metadata functions
 cmd_status() {    
     # Check if session exists and is valid, if not create one
     if ! is_session_valid; then
@@ -191,7 +203,13 @@ cmd_status() {
     echo 
 }
 
-# Update LAM with enhanced security
+# Update LAM to latest version with enhanced security
+# Arguments:
+#   None
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   SCRIPT_DIR: Installation directory for update operations
 cmd_update() {
     log_info "Checking for LAM updates..."
     echo
@@ -380,7 +398,13 @@ EOF
     trap - EXIT
 }
 
-# Show manual update instructions
+# Display manual update instructions when automatic update fails
+# Arguments:
+#   None
+# Returns:
+#   Always returns 0
+# Globals:
+#   None
 manual_update_instructions() {
     echo -e "${BLUE}1. Download LAM source code from GitHub:${NC}"
     log_gray "   • Visit: ${PURPLE}https://github.com/Ahzyuan/LLM-Apikey-Manager${NC}"
@@ -400,7 +424,13 @@ manual_update_instructions() {
     log_gray "   • Your existing profiles and configuration will be preserved"
 }
 
-# Uninstall LAM with complete cleanup
+# Completely uninstall LAM with comprehensive cleanup
+# Arguments:
+#   None
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   CONFIG_DIR, BACKUP_DIR, SCRIPT_DIR: Directories for cleanup
 cmd_uninstall() {
     if check_initialization 2>/dev/null; then
         local master_password

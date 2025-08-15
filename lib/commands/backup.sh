@@ -3,6 +3,14 @@
 # LAM Backup Commands
 # All backup management functionality
 
+# Main backup command dispatcher with subcommand routing
+# Arguments:
+#   $1 - action: Backup action (create, list, info, load, delete, help)
+#   $2 - target: Target file or name (optional, depends on action)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Routes to appropriate backup functions
 cmd_backup() {
     local action="${1:-help}"
     local backup_name="${2:-}"
@@ -34,6 +42,14 @@ cmd_backup() {
     esac
 }
 
+# Interactive selection helper for backup operations
+# Arguments:
+#   $1 - prompt: Prompt message for selection
+#   $2 - options: Array of options to choose from
+# Returns:
+#   0 on success, outputs selected option to stdout; 1 on failure
+# Globals:
+#   None
 _interactive_selection() {
     local backup_file="$1"
     local backup_dir="$HOME/.lam-backups"
@@ -104,7 +120,13 @@ _interactive_selection() {
     echo "$backup_path"
 }
 
-# Create a new backup
+# Create a new encrypted backup of all profiles and configuration
+# Arguments:
+#   $1 - backup_name: Custom backup name (optional)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   CONFIG_DIR, BACKUP_DIR: Source and destination directories
 backup_create() {
     local backup_name="$1"
     
@@ -223,7 +245,13 @@ backup_create() {
     fi
 }
 
-# List all available backups
+# List all available backups with detailed information
+# Arguments:
+#   None
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   BACKUP_DIR: Directory containing backup files
 backup_list() {
     local backup_dir="$HOME/.lam-backups"
     
@@ -274,7 +302,13 @@ backup_list() {
     log_gray "• Delete a backup: lam backup delete <filename>"
 }
 
-# Show detailed backup information
+# Show detailed information about a specific backup
+# Arguments:
+#   $1 - backup_file: Backup file to analyze (optional, prompts if not provided)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   BACKUP_DIR: Directory containing backup files
 backup_info() {
     local backup_file="$1"
     local backup_path
@@ -341,7 +375,13 @@ backup_info() {
     fi
 }
 
-# Restore a backup
+# Load configuration from backup with validation and confirmation
+# Arguments:
+#   $1 - backup_file: Backup file to restore (optional, prompts if not provided)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   CONFIG_DIR, BACKUP_DIR: Target and source directories
 backup_load() {
     local backup_file="$1"
     local backup_path
@@ -398,7 +438,13 @@ backup_load() {
     log_success "Your LAM configuration has been restored from: ${PURPLE}$backup_file${NC}"
 }
 
-# Delete a backup
+# Delete a backup file with confirmation
+# Arguments:
+#   $1 - backup_file: Backup file to delete (optional, prompts if not provided)
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   BACKUP_DIR: Directory containing backup files
 backup_delete() {
     local backup_file="$1"
     local backup_path
@@ -425,7 +471,13 @@ backup_delete() {
     fi
 }
 
-# Show backup help
+# Display comprehensive help for backup management
+# Arguments:
+#   None
+# Returns:
+#   Always returns 0
+# Globals:
+#   None
 backup_help() {
     echo "LAM Backup Management"
     echo

@@ -5,7 +5,13 @@
 
 # ----------------------------------- Database Setup -----------------------------------
 
-# Create configuration directory
+# Create and initialize LAM configuration directory with secure permissions
+# Arguments:
+#   None
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   CONFIG_DIR: Path to configuration directory
 init_config_dir() {
 
     if [[ ! -d "$CONFIG_DIR" ]]; then
@@ -25,7 +31,13 @@ init_config_dir() {
     return 0
 }
 
-# Initialize database with schema
+# Initialize SQLite database with complete schema, indexes, and triggers
+# Arguments:
+#   None
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   DB_FILE: Path to SQLite database file
 init_database() {    
     # Create database and tables
     local schema="
@@ -100,10 +112,14 @@ init_database() {
 
 # ------------------------------------- SQL Execution -------------------------------------
 
-# Execute SQL command with optional result output
-# Usage: execute_sql "SQL_COMMAND" [return_results]
-# - If return_results is "true" or "1", returns query results
-# - Otherwise, executes command silently and returns exit code
+# Execute SQL command with optional result output and error handling
+# Arguments:
+#   $1 - sql: SQL command to execute
+#   $2 - return_result: "true" to return query results (optional)
+# Returns:
+#   0 on success, 1 on failure; outputs results to stdout if requested
+# Globals:
+#   DB_FILE: Path to SQLite database file
 execute_sql() {
     local sql="$1"
     local return_results="${2:-false}"
@@ -132,7 +148,13 @@ execute_sql() {
 
 # -------------------------------- Profile CRUD Operations --------------------------------
 
-# Check if profile exists
+# Check if a profile with given name exists in database
+# Arguments:
+#   $1 - name: Profile name to check
+# Returns:
+#   0 if profile exists, 1 if not found or error
+# Globals:
+#   Uses execute_sql function
 profile_exists() {
     local name="$1"
     
@@ -147,7 +169,16 @@ profile_exists() {
     [[ "$count" -gt 0 ]]
 }
 
-# Create new profile
+# Create new profile with encrypted environment variables
+# Arguments:
+#   $1 - name: Profile name
+#   $2 - model_name: Model name for the profile
+#   $3 - description: Profile description (optional)
+#   $4 - env_vars_json: JSON object with environment variables
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses execute_sql and database operations
 create_profile() {
     local name="$1"
     local model_name="$2"
@@ -224,7 +255,13 @@ create_profile() {
     return 0
 }
 
-# Get profile by name (returns JSON format for compatibility)
+# Retrieve profile data by name in JSON format
+# Arguments:
+#   $1 - name: Profile name to retrieve
+# Returns:
+#   0 on success, outputs JSON to stdout; 1 on failure
+# Globals:
+#   Uses execute_sql and database operations
 get_profile() {
     local name="$1"
     
@@ -287,7 +324,13 @@ get_profile() {
     echo "$profile_json"
 }
 
-# Get all profiles (returns JSON array for compatibility)
+# Get all profiles as JSON array for compatibility
+# Arguments:
+#   None
+# Returns:
+#   0 on success, outputs JSON array to stdout
+# Globals:
+#   Uses execute_sql function
 get_all_profiles() {
     local profiles_data
     profiles_data=$(execute_sql "
@@ -327,17 +370,38 @@ get_all_profiles() {
     echo "$json_array"
 }
 
-# Get profile names only
+# Get list of all profile names
+# Arguments:
+#   None
+# Returns:
+#   0 on success, outputs profile names to stdout
+# Globals:
+#   Uses execute_sql function
 get_profile_names() {
     execute_sql "SELECT name FROM profiles ORDER BY name;" true
 }
 
-# Get profile count
+# Get total count of profiles in database
+# Arguments:
+#   None
+# Returns:
+#   0 on success, outputs count to stdout
+# Globals:
+#   Uses execute_sql function
 get_profile_count() {
     execute_sql "SELECT COUNT(*) FROM profiles;" true
 }
 
-# Update profile
+# Update existing profile with new data
+# Arguments:
+#   $1 - name: Profile name to update
+#   $2 - model_name: New model name
+#   $3 - description: New description
+#   $4 - env_vars_json: New environment variables JSON
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses execute_sql and database operations
 update_profile() {
     local name="$1"
     local model_name="$2"
@@ -431,7 +495,13 @@ update_profile() {
     return 0
 }
 
-# Update profile last used timestamp
+# Update the last_used timestamp for a profile
+# Arguments:
+#   $1 - name: Profile name to update
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses execute_sql function
 update_profile_last_used() {
     local name="$1"
     
@@ -451,7 +521,13 @@ update_profile_last_used() {
     execute_sql "$sql"
 }
 
-# Delete profile and all related data
+# Delete profile and all related data with CASCADE
+# Arguments:
+#   $1 - name: Profile name to delete
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses execute_sql function
 delete_profile() {
     local name="$1"
     
@@ -505,6 +581,13 @@ delete_profile() {
     return 0
 }
 
+# Clear all profiles and related data from database
+# Arguments:
+#   None
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses execute_sql function
 clear_all_profiles() {
     local clear_sql="
         BEGIN TRANSACTION;
@@ -529,7 +612,14 @@ clear_all_profiles() {
 
 # ----------------------------------- Metadata Operations -----------------------------------
 
-# Set metadata key-value pair
+# Set metadata key-value pair in database
+# Arguments:
+#   $1 - key: Metadata key
+#   $2 - value: Metadata value
+# Returns:
+#   0 on success, 1 on failure
+# Globals:
+#   Uses execute_sql function
 set_metadata() {
     local key="$1"
     local value="$2"
@@ -550,7 +640,13 @@ set_metadata() {
     execute_sql "$sql"
 }
 
-# Get metadata value
+# Get metadata value by key from database
+# Arguments:
+#   $1 - key: Metadata key to retrieve
+# Returns:
+#   0 on success, outputs value to stdout; 1 on failure
+# Globals:
+#   Uses execute_sql function
 get_metadata() {
     local key="$1"
     

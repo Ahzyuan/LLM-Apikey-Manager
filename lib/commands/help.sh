@@ -3,8 +3,13 @@
 # LAM Tool Help & Version
 # Functions: version, help
 
-# Get version info from VERSION file
-# returns "version|description"
+# Get version information from VERSION file
+# Arguments:
+#   None
+# Returns:
+#   0 on success, outputs "version|description" to stdout
+# Globals:
+#   SCRIPT_DIR: Directory containing VERSION file
 get_version_info() {
     local version_file
     version_file="$SCRIPT_DIR/VERSION"
@@ -36,6 +41,13 @@ get_version_info() {
     fi
 }
 
+# Display LAM version information
+# Arguments:
+#   None
+# Returns:
+#   Always returns 0
+# Globals:
+#   Uses get_version_info function
 cmd_version() {
     local version_info
     local version_number
@@ -51,6 +63,13 @@ cmd_version() {
     fi
 }
 
+# Display comprehensive help information for LAM
+# Arguments:
+#   None
+# Returns:
+#   Always returns 0
+# Globals:
+#   Uses get_version_info function
 cmd_help() {
     echo "LAM (LLM API Manager) v$(get_version_info | cut -d'|' -f1) - Secure management of LLM API credentials"
     echo
