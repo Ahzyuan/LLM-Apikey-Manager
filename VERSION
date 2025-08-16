@@ -1,2 +1,2 @@
-0.1.1
-Remove trap handler upon function return normally in update command
+0.1.2
+Avoid multi-lines result in encryption process

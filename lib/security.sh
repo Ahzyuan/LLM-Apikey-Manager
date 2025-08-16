@@ -529,8 +529,8 @@ encrypt_data() {
         return 1
     fi
     
-    # Use OpenSSL for encryption with salt
-    echo "$data" | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass pass:"$password" -base64 2>/dev/null || {
+    # Use OpenSSL for encryption with salt (use -A to prevent line wrapping in base64)
+    echo "$data" | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 -pass pass:"$password" -base64 -A 2>/dev/null || {
         log_error "Failed to encrypt data"
         return 1
     }
@@ -553,8 +553,8 @@ decrypt_data() {
         return 1
     fi
     
-    # Use OpenSSL for decryption
-    echo "$encrypted_data" | openssl enc -aes-256-cbc -d -salt -pbkdf2 -iter 100000 -pass pass:"$password" -base64 2>/dev/null || {
+    # Use OpenSSL for decryption (use -A to handle single-line base64)
+    echo "$encrypted_data" | openssl enc -aes-256-cbc -d -salt -pbkdf2 -iter 100000 -pass pass:"$password" -base64 -A 2>/dev/null || {
         log_error "Failed to decrypt data - incorrect password or corrupted data"
         return 1
     }
